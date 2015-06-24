@@ -1,0 +1,57 @@
+{
+  "id": "window",
+  "label": "Modeled Crop Production",
+  "targetScript": "natcap.invest.crop_production.crop_production_modeled",
+  "modelName": "crop_production_modeled",
+  "localDocURI": "../documentation/crop_production.html#modeled",
+  "condenseElements": true,
+  "height": 800,
+  "width": 700,
+  "elements": [
+    {
+      "id": "objectiveTabGroup",
+      "type": "tabbedGroup",
+      "elements": [
+        {
+          "id": "main_tab",
+          "label": "Inputs",
+          "type": "tab",
+          "elements": [
+            {
+              "id": "alpha_only",
+              "label": "This tool is in an ALPHA testing stage and should not be used for decision making.",
+              "type": "label",
+              "helpText": "Alpha tools are considered unstable."
+            },
+            {
+              "id": "main_tab_list",
+              "type": "list",
+              "elements": [
+                {
+                  "id": "workspace_dir",
+                  "args_id": "workspace_dir",
+                  "type": "folder",
+                  "label": "Workspace",
+                  "defaultValue": "../CropProduction/output",
+                  "required": true,
+                  "helpText": "The selected folder is used as the workspace where all intermediate and output files will be written.<br><br>If the selected folder does not exist, it will be created.<br><br><b>If datasets already exist in the selected folder, they will be overwritten.</b>"
+                },
+                {
+                  "id": "crop_file_name",
+                  "args_id": "crop_file_name",
+                  "type": "file",
+                  "label": "Crop Map (Raster)",
+                  "defaultValue": "../CropProduction/input/lulc_samp_cur.tif",
+                  "validateAs": {
+                    "type": "GDAL"
+                  },
+                  "required": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

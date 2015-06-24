@@ -1,0 +1,189 @@
+{
+  "id": "window",
+  "label": "Monthly Water Yield",
+  "targetScript": "natcap.invest.monthly_water_yield.monthly_water_yield",
+  "modelName": "monthly_water_yield",
+  "localDocURI": "../documentation/monthlywateryield.html",
+  "height": 700,
+  "width": 900,
+  "elements": [
+    {
+      "id": "workspace_list",
+      "type": "list",
+      "elements": [
+        {
+          "id": "workspace",
+          "args_id": "workspace_dir",
+          "type": "folder",
+          "label": "Workspace",
+          "defaultValue": "",
+          "required": true,
+          "helpText": "The selected folder is used as the workspace where all intermediate and output files will be written.<br><br>If the selected folder does not exist, it will be created.<br><br><b>If datasets already exist in the selected folder, they will be overwritten.</b>"
+        },
+        {
+          "id": "results_suffix",
+          "args_id": "results_suffix",
+          "type": "text",
+          "dataType": "string",
+          "label": "Results Suffix (Optional)",
+          "defaultValue": "",
+          "required": false,
+          "returns": {
+            "ifEmpty": "pass"
+          }
+        },
+        {
+          "id": "precip_data",
+          "args_id": "precip_data_uri",
+          "type": "file",
+          "label": "Monthly Time Step Data For Precipitation (CSV)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "CSV"
+          }
+        },
+        {
+          "id": "eto_data",
+          "args_id": "eto_data_uri",
+          "type": "file",
+          "label": "Monthly Time Step Data For ETo (CSV)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "CSV"
+          }
+        },
+        {
+          "id": "soil_max",
+          "args_id": "soil_max_uri",
+          "type": "file",
+          "label": "Soil Max (Raster)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          }
+        },
+        {
+          "id": "soil_texture",
+          "args_id": "soil_texture_uri",
+          "type": "file",
+          "label": "Soil Texture (%) (Raster)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          }
+        },
+        {
+          "id": "land_use",
+          "args_id": "lulc_uri",
+          "type": "file",
+          "label": "LULC (Raster)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          }
+        },
+        {
+          "id": "lulc_data",
+          "args_id": "lulc_data_uri",
+          "type": "file",
+          "label": "LULC Lookup Table (CSV)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "CSV"
+          }
+        },
+        {
+          "id": "dem",
+          "args_id": "dem_uri",
+          "type": "file",
+          "label": "DEM (Raster)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          }
+        },
+        {
+          "id": "model_param_data",
+          "args_id": "model_params_uri",
+          "type": "file",
+          "label": "Model Parameters (CSV)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "CSV"
+          }
+        },
+        {
+          "id": "watersheds",
+          "args_id": "watersheds_uri",
+          "type": "file",
+          "label": "Watersheds (Vector)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "OGR",
+            "layers": [
+              {
+                "name": {
+                  "inheritFrom": "file"
+                },
+                "type": "polygons",
+                "projection": {
+                  "exists": true
+                }
+              }
+            ],
+            "fieldsExist": [
+              "ws_id"
+            ]
+          }
+        },
+        {
+          "id": "subwatersheds",
+          "args_id": "sub_watersheds_uri",
+          "type": "file",
+          "label": "Sub Watersheds (Vector) (Optional)",
+          "defaultValue": "",
+          "required": false,
+          "validateAs": {
+            "type": "OGR",
+            "layers": [
+              {
+                "name": {
+                  "inheritFrom": "file"
+                },
+                "type": "polygons",
+                "projection": {
+                  "exists": true
+                }
+              }
+            ],
+            "fieldsExist": [
+              "subws_id"
+            ]
+          },
+          "returns": {
+            "ifEmpty": "pass"
+          }
+        },
+        {
+          "id": "threshold_flow_accumulation",
+          "args_id": "threshold_flow_accumulation",
+          "type": "text",
+          "label": "Threshold Flow Accumluation",
+          "defaultValue": "1000",
+          "required": true,
+          "validText": "^[0-9]+$",
+          "helpText": "The number of upstream cells that must flow into a cell before it's considered part of a stream such that retention stops and the remaining export is exported to the stream. Used to define streams from the DEM."
+        }
+      ]
+    }
+  ]
+}

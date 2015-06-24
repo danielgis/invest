@@ -1,0 +1,273 @@
+{
+	"nutrition_table" : {
+            "id_field" : "Id",
+            "columns" : {
+                "Protein (N x 6.25) g per 100 g" : {
+                    "args_id" : "nutrient_protein",
+                    "formatting" : {
+                        "abbreviation" : "protein",
+                        "short_name" : "Protein",
+                        "order" : 1
+                    }
+                },
+                "Total lipid (g per 100 g)" : {
+                    "args_id" : "nutrient_lipids",
+                    "formatting" : {
+                        "abbreviation" : "lipids",
+                        "short_name" : "Lipids",
+                        "order" : 2
+                    }                        
+                },
+                "Energy (kj) per 100 g" : {
+                    "args_id" : "nutrient_energy",
+                    "formatting" : {
+                        "abbreviation" : "kJ",
+                        "short_name" : "Energy",
+                        "order" : 3
+                    }                        
+                },
+                "Calcium (g per 100g)" : {
+                    "args_id" : "nutrient_calcium",
+                    "formatting" : {
+                        "abbreviation" : "Ca",
+                        "short_name" : "Calcium",
+                        "order" : 4
+                    }                        
+                },
+                "Iron (g per 100g)" : {
+                    "args_id" : "nutrient_iron",
+                    "formatting" : {
+                        "abbreviation" : "Fe",
+                        "short_name" : "Iron",
+                        "order" : 5
+                    }                        
+                },
+                "Magnesium (g per 100g)" : {
+                    "args_id" : "nutrient_magnesium",
+                    "formatting" : {
+                        "abbreviation" : "Mg",
+                        "short_name" : "Magnesium",
+                        "order" : 6
+                    }                        
+                },
+                "Phosphorus (g per 100g)" : {
+                    "args_id" : "nutrient_phosphorus",
+                    "formatting" : {
+                        "abbreviation" : "P",
+                        "short_name" : "Phosphorus",
+                        "order" : 7
+                    }                        
+                },
+                "Potassium (g per 100 g)" : {
+                    "args_id" : "nutrient_potassium",
+                    "formatting" : {
+                        "abbreviation" : "K",
+                        "short_name" : "Potassium",
+                        "order" : 8
+                    }                        
+                },
+                "Sodium (g per 100g)" : {
+                    "args_id" : "nutrient_sodium",
+                    "formatting" : {
+                        "abbreviation" : "Na",
+                        "short_name" : "Sodium",
+                        "order" : 9
+                    }                        
+                },
+                "Zinc (g per 100g)" : {
+                    "args_id" : "nutrient_zinc",
+                    "formatting" : {
+                        "abbreviation" : "Zn",
+                        "short_name" : "Zinc",
+                        "order" : 10
+                    }                        
+                },
+                "Copper (g per 100g)" : {
+                    "args_id" : "nutrient_copper",
+                    "formatting" : {
+                        "abbreviation" : "Cu",
+                        "short_name" : "Copper",
+                        "order" : 11
+                    }                        
+                },
+                "Fluoride  F (g per 100g)" : {
+                    "args_id" : "nutrient_flouride",
+                    "formatting" : {
+                        "abbreviation" : "F",
+                        "short_name" : "Flouride",
+                        "order" : 12
+                    }                        
+                },
+                "Manganese (g per 100g)" : {
+                    "args_id" : "nutrient_manganese",
+                    "formatting" : {
+                        "abbreviation" : "Mn",
+                        "short_name" : "Manganese",
+                        "order" : 13
+                    }                        
+                },
+                "Selenium (g per 100g)" : {
+                    "args_id" : "nutrient_selenium",
+                    "formatting" : {
+                        "abbreviation" : "Se",
+                        "short_name" : "Selenium",
+                        "order" : 14
+                    }                        
+                },
+                "Vitamin A (IU per 100g)" : {
+                    "args_id" : "nutrient_vit_a",
+                    "formatting" : {
+                        "abbreviation" : "vit_A",
+                        "short_name" : "Vitamin A",
+                        "order" : 15
+                    }                        
+                },
+                "Carotene  beta (g per 100g)": {
+                    "args_id" : "nutrient_carotene_b",
+                    "formatting" : {
+                        "abbreviation" : "carotene_B",
+                        "short_name" : "Carotene β",
+                        "order" : 16
+                    }                        
+                },
+                "Carotene  alpha (g per 100g)" : {
+                    "args_id" : "nutrient_carotene_a",
+                    "formatting" : {
+                        "abbreviation" : "carotene_A",
+                        "short_name" : "Carotene α",
+                        "order" : 17
+                    }                        
+                },
+                "Vitamin E (alpha-tocopherol) g per 100g" : {
+                    "args_id" : "nutrient_vit_e",
+                    "formatting" : {
+                        "abbreviation" : "vit_E",
+                        "short_name" : "Vitamin E",
+                        "order" : 18
+                    }                        
+                },
+                "Cryptoxanthin  beta (g per 100g)" : {
+                    "args_id" : "nutrient_cryptoxanthin",
+                    "formatting" : {
+                        "abbreviation" : "C_xanthin_B",
+                        "short_name" : "Cryptoxanthin",
+                        "order" : 19
+                    }                        
+                },
+                "Lycopene (g per 100g)" : {
+                    "args_id" : "nutrient_lycopene",
+                    "formatting" : {
+                        "abbreviation" : "lycopene",
+                        "short_name" : "Lycopene",
+                        "order" : 20
+                    }                        
+                },
+                "Lutein + zeaxanthin (g per 100g)" : {
+                    "args_id" : "nutrient_lutein",
+                    "formatting" : {
+                        "abbreviation" : "Lutein_Zeaxanthin",
+                        "short_name" : "Lutein & Zeaxanthin",
+                        "order" : 21
+                    }                        
+                },
+                "Tocopherol  beta (g per 100g)" : {
+                    "args_id" : "nutrient_tocopherol_b",
+                    "formatting" : {
+                        "abbreviation" : "Tocopherol_B",
+                        "short_name" : "Tocopherol β",
+                        "order" : 22
+                    }                        
+                },
+                "Tocopherol gamma (g per 100g)" : {
+                    "args_id" : "nutrient_tocopherol_g",
+                    "formatting" : {
+                        "abbreviation" : "Tocopherol_G",
+                        "short_name" : "Tocopherol γ",
+                        "order" : 23
+                    }                        
+                },
+                "Tocopherol  Delta (g per 100g)" : {
+                    "args_id" : "nutrient_tocopherol_d",
+                    "formatting" : {
+                        "abbreviation" : "Tocopherol_D",
+                        "short_name" : "Tocopherol δ",
+                        "order" : 24
+                    }                        
+                },
+                "Vitamin C (g per 100g)" : {
+                    "args_id" : "nutrient_vit_c",
+                    "formatting" : {
+                        "abbreviation" : "vit_C",
+                        "short_name" : "Vitamin C",
+                        "order" : 25
+                    }                        
+                },
+                "Thiamin (g per 100g)" : {
+                    "args_id" : "nutrient_vit_b1",
+                    "formatting" : {
+                        "abbreviation" : "vit_B1",
+                        "short_name" : "Vitamin B1",
+                        "order" : 26
+                    }                        
+                },
+                "Riboflavin (g per 100g)" : {
+                    "args_id" : "nutrient_vit_b2",
+                    "formatting" : {
+                        "abbreviation" : "vit_B2",
+                        "short_name" : "Vitamin B2",
+                        "order" : 27
+                    }                        
+                },
+                "Niacin (g per 100g)" : {
+                    "args_id" : "nutrient_vit_b3",
+                    "formatting" : {
+                        "abbreviation" : "vit_B3",
+                        "short_name" : "Vitamin B3",
+                        "order" : 28
+                    }                        
+                },
+                "Pantothenic acid (g per 100 g)" : {
+                    "args_id" : "nutrient_vit_b5",
+                    "formatting" : {
+                        "abbreviation" : "vit_B5",
+                        "short_name" : "Vitamin B5",
+                        "order" : 29
+                    }                        
+                },
+                "Vitamin B6 (g per 100g)" : {
+                    "args_id" : "nutrient_vit_b6",
+                    "formatting" : {
+                        "abbreviation" : "vit_B6",
+                        "short_name" : "Vitamin B6",
+                        "order" : 30
+                    }                        
+                },
+                "Folate  total (g per 100g)" : {
+                    "args_id" : "nutrient_vit_b9",
+                    "formatting" : {
+                        "abbreviation" : "vit_B9",
+                        "short_name" : "Vitamin B9",
+                        "order" : 31
+                    }                        
+                },
+                "Vitamin B-12 (g per 100g)" : {
+                    "args_id" : "nutrient_vit_b12",
+                    "formatting" : {
+                        "abbreviation" : "vit_B12",
+                        "short_name" : "Vitamin B12",
+                        "order" : 32
+                    }                        
+                },
+                "Vitamin K (g per 100g)" : {
+                    "args_id" : "nutrient_vit_k",
+                    "formatting" : {
+                        "abbreviation" : "vit_K",
+                        "short_name" : "Vitamin K",
+                        "order" : 33
+                    }                        
+                }
+            }
+        }
+                
+
+}
