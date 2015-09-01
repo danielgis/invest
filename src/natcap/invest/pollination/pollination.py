@@ -131,7 +131,6 @@ def execute(args):
 
         # Open the landcover raster
         uri = args['landuse_' + scenario +'_uri'].encode('utf-8')
-        LOGGER.debug('Opening landuse raster from %s', uri)
         biophysical_args['landuse'] = uri
 
         # Open a Table Handler for the land use attributes table and a different
@@ -143,8 +142,6 @@ def execute(args):
         att_table_fields = att_table_handler.get_fieldnames()
         nesting_fields = [f[2:] for f in att_table_fields if re.match('^n_', f)]
         floral_fields = [f[2:] for f in att_table_fields if re.match('^f_', f)]
-        LOGGER.debug('Parsed nesting fields: %s', nesting_fields)
-        LOGGER.debug('Parsed floral fields: %s', floral_fields)
 
         fields_to_check = [
             (nesting_fields, 'nesting'),
@@ -183,7 +180,6 @@ def execute(args):
             # use an empty list in its stead.
             ag_class_list = []
 
-        LOGGER.debug('Parsed ag classes: %s', ag_class_list)
         biophysical_args['ag_classes'] = ag_class_list
 
         # Defined which rasters need to be created at the global level (at the
@@ -203,7 +199,6 @@ def execute(args):
         LOGGER.info('Creating top-level raster URIs')
         for key, base, folder in global_rasters:
             raster_uri = os.path.join(folder, '%s%s.tif' % (base, file_suffix))
-            LOGGER.debug('%s: %s', key, raster_uri)
             biophysical_args[key] = raster_uri
 
         # Fetch a list of all species from the guilds table.
@@ -238,7 +233,6 @@ def execute(args):
                     folder, '%s_%s%s.tif' % (
                         raster_name, scenario, file_suffix))
 
-                LOGGER.debug('%s: %s', group, raster_uri)
                 biophysical_args['species'][species][group] = raster_uri
 
         execute_model(biophysical_args)
@@ -295,10 +289,7 @@ def execute_model(args):
 
         returns nothing."""
 
-    LOGGER.debug('Starting pollination calculations')
-
     nodata = -1.0
-    LOGGER.debug('Using nodata value of %s for internal rasters', nodata)
 
     reclass_ag_raster(
         args['landuse'], args['ag_map'], args['ag_classes'], nodata)
@@ -325,8 +316,6 @@ def execute_model(args):
 
     # Loop through all species and perform the necessary calculations.
     for species, species_dict in args['species'].iteritems():
-        LOGGER.debug('Starting %s species', species)
-
         # We need the guild dictionary for a couple different things later on
         guild_dict = args['guilds'].get_table_row('species', species)
 
@@ -414,19 +403,14 @@ def execute_model(args):
     # Divide the total pollination foraging index by the number of pollinators
     # to get the mean pollinator foraging index and save that to its raster.
     num_species = float(len(args['species'].values()))
-    LOGGER.debug('Number of species: %s', num_species)
 
     # Calculate the mean foraging values per species.
-    LOGGER.debug('Calculating mean foraging score')
     divide_raster(
         args['foraging_average'], num_species, args['foraging_average'])
 
     # Calculate the mean pollinator supply (pollinator abundance) by taking the
     # abundance_total_matrix and dividing it by the number of pollinators.
-    LOGGER.debug('Calculating mean pollinator supply')
     divide_raster(args['abundance_total'], num_species, args['abundance_total'])
-
-    LOGGER.debug('Finished pollination biophysical calculations')
 
 
 def calculate_abundance(
@@ -483,16 +467,15 @@ def calculate_abundance(
     # Fetch the floral resources raster and matrix from the args dictionary
     # apply an exponential convolution filter and save the floral resources raster to the
     # dataset.
-    LOGGER.debug('Applying neighborhood mappings to floral resources')
     pygeoprocessing.geoprocessing.convolve_2d_uri(
         floral_raster_temp_uri, kernel_uri, uris['floral'])
     os.remove(kernel_uri)
+
     # Calculate the pollinator abundance index (using Math! to simplify the
     # equation in the documentation.  We're still waiting on Taylor
     # Rickett's reply to see if this is correct.
     # Once the pollination supply has been calculated, we add it to the
     # total abundance matrix.
-    LOGGER.debug('Calculating abundance index')
     try:
         species_weight = float(guild['species_weight'])
     except KeyError:
@@ -521,8 +504,6 @@ def calculate_farm_abundance(species_abundance, ag_map, alpha, uri):
 
         Returns nothing."""
 
-    LOGGER.debug('Starting to calculate farm abundance')
-
     farm_abundance_temp_uri = pygeoprocessing.geoprocessing.temporary_filename()
     species_abundance_uri = species_abundance
     species_abundance = gdal.Open(species_abundance_uri)
@@ -533,18 +514,15 @@ def calculate_farm_abundance(species_abundance, ag_map, alpha, uri):
     kernel_uri = pygeoprocessing.geoprocessing.temporary_filename()
     make_exponential_decay_kernel_uri(expected_distance, kernel_uri)
 
-    LOGGER.debug('Calculating foraging/farm abundance index')
     pygeoprocessing.geoprocessing.convolve_2d_uri(
         species_abundance_uri, kernel_uri, farm_abundance_temp_uri)
     os.remove(kernel_uri)
 
     nodata = species_abundance.GetRasterBand(1).GetNoDataValue()
-    LOGGER.debug('Using nodata value %s from species abundance raster', nodata)
 
     # Mask the farm abundance raster according to whether the pixel is
     # agricultural.  If the pixel is agricultural, the value is preserved.
     # Otherwise, the value is set to nodata.
-    LOGGER.debug('Setting all agricultural pixels to 0')
     pygeoprocessing.geoprocessing.vectorize_datasets(
         dataset_uri_list=[farm_abundance_temp_uri, ag_map],
         dataset_pixel_op=lambda x, y: numpy.where(y == 1.0, x, nodata),
@@ -584,7 +562,6 @@ def reclass_ag_raster(landuse_uri, out_uri, ag_classes, nodata):
         if lucode not in reclass_rules:
             reclass_rules[lucode] = default_value
 
-    LOGGER.debug('Agricultural reclass map=%s', reclass_rules)
     pygeoprocessing.geoprocessing.reclassify_dataset_uri(
         landuse_uri, reclass_rules, out_uri, gdal.GDT_Float32, nodata,
         exception_flag='values_required')
@@ -609,7 +586,6 @@ def add_two_rasters(raster_1, raster_2, out_uri):
         old_out_uri = out_uri
         temp_dir = True
         out_uri = pygeoprocessing.geoprocessing.temporary_filename()
-        LOGGER.debug('Sum will be saved to temp file %s', out_uri)
 
     nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(raster_1)
     min_pixel_size = min([
@@ -632,7 +608,6 @@ def add_two_rasters(raster_1, raster_2, out_uri):
     if temp_dir != None:
         os.remove(old_out_uri)
         shutil.move(out_uri, old_out_uri)
-        LOGGER.debug('Moved temp sum to %s', old_out_uri)
 
 
 def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
@@ -662,11 +637,8 @@ def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
 
         Returns nothing."""
 
-    LOGGER.debug('Calculating the service value')
-
     # Open the species foraging matrix and then divide
     # the yield matrix by the foraging matrix for this pollinator.
-    LOGGER.debug('Calculating pollinator value to farms')
     min_pixel_size = min([
         pygeoprocessing.geoprocessing.get_cell_size_from_uri(x) for x in
         [rasters['farm_value'], rasters['farm_abundance']]])
@@ -685,17 +657,13 @@ def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
     expected_distance = alpha / min_pixel_size
     kernel_uri = pygeoprocessing.geoprocessing.temporary_filename()
     make_exponential_decay_kernel_uri(expected_distance, kernel_uri)
-    LOGGER.debug('Exponetial decay on ratio raster')
     pygeoprocessing.geoprocessing.convolve_2d_uri(
         out_uris['species_value'], kernel_uri, out_uris['species_value_blurred'])
     os.remove(kernel_uri)
 
     # Vectorize the ps_vectorized function
-    LOGGER.debug('Attributing farm value to the current species')
-
     temp_service_uri = pygeoprocessing.geoprocessing.temporary_filename()
 
-    LOGGER.debug('Saving service value raster to %s', temp_service_uri)
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [rasters['species_abundance'], out_uris['species_value_blurred']],
         lambda x, y: numpy.where(
@@ -708,7 +676,6 @@ def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
         vectorize_op=False)
 
     # Set all agricultural pixels to 0.  This is according to issue 761.
-    LOGGER.debug('Marking the value of all non-ag pixels as 0.0.')
     pygeoprocessing.geoprocessing.vectorize_datasets(
         dataset_uri_list=[rasters['ag_map'], temp_service_uri],
         dataset_pixel_op=lambda x, y: numpy.where(x == 0, 0.0, y),
@@ -718,8 +685,6 @@ def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
         pixel_size_out=min_pixel_size,
         bounding_box_mode='intersection',
         vectorize_op=False)
-
-    LOGGER.debug('Finished calculating service value')
 
 
 def calculate_yield(in_raster, out_uri, half_sat, wild_poll, out_nodata):
@@ -733,8 +698,6 @@ def calculate_yield(in_raster, out_uri, half_sat, wild_poll, out_nodata):
         out_nodata - the nodata value for the output raster
 
         Returns nothing"""
-
-    LOGGER.debug('Calculating yield')
 
     # Calculate the yield raster
     kappa_c = float(half_sat)
@@ -780,7 +743,6 @@ def divide_raster(raster, divisor, uri):
         old_out_uri = uri
         temp_dir = True
         uri = pygeoprocessing.geoprocessing.temporary_filename()
-        LOGGER.debug('Quotient raster will be saved to temp file %s', uri)
 
     nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(raster)
     pygeoprocessing.geoprocessing.vectorize_datasets(
@@ -799,7 +761,6 @@ def divide_raster(raster, divisor, uri):
     if temp_dir != None:
         os.remove(old_out_uri)
         shutil.move(uri, old_out_uri)
-        LOGGER.debug('Moved temp quotient to %s', old_out_uri)
 
 
 def map_attribute(base_raster, attr_table, guild_dict, resource_fields,
