@@ -54,8 +54,6 @@ def execute(args):
             classes that are to be considered as agricultural.  If this
             input is not provided, all land cover classes are considered to
             be agricultural.
-        farms_shapefile (string): (Optional) shapefile containing points
-            representing data collection points on the landscape.
         results_suffix (string): inserted into the URI of each file created by
             this model, right before the file extension.
 
@@ -71,7 +69,6 @@ def execute(args):
             'wild_pollination_proportion': 'example',
             'guilds_uri': 'path/to/csv',
             'ag_classes': 'example',
-            'farms_shapefile': 'example',
             'results_suffix': 'example',
 
         }
@@ -81,7 +78,6 @@ def execute(args):
         1. landuse_fut_uri
         2. ag_classes
         3. results_suffix
-        4. farms_shapefile
 
     If args['do_valuation'] is set to True, the following args dictionary
     entries are also required:
@@ -247,105 +243,6 @@ def execute(args):
 
         pollination_core.execute_model(biophysical_args)
 
-        # If the user provided a farms shapefile input, aggregate the
-        # biophysical species abundance data according to the farms table.
-        # This aggregate score will be stored to a scenario-specific shapefile.
-        if 'farms_shapefile' in args:
-            LOGGER.info('Starting to aggregate by farms')
-            encoding = sys.getfilesystemencoding()
-            base_shapefile = args['farms_shapefile'].encode(encoding)
-            shapefile_folder = build_uri(out_dir, 'farms_abundance', [scenario,
-                suffix])
-
-            # Delete the old shapefile folder if it already exists.
-            try:
-                shutil.rmtree(shapefile_folder)
-                LOGGER.debug('Removed old farms folder at %s',
-                     shapefile_folder)
-            except OSError as exception:
-                # The shapefile folder does not exist.  We need to make it
-                # anyways, so we really don't care.
-                LOGGER.debug('Exception: %s', exception)
-                LOGGER.debug('Farms folder did not exist previously: %s',
-                    shapefile_folder)
-
-            # Make the shapefile folder to contain the farms shapefile.
-            os.makedirs(shapefile_folder)
-            LOGGER.debug('Farms shapefile will be saved to %s',
-                 shapefile_folder)
-
-            farms_file = ogr.Open(base_shapefile, 0)
-            ogr_driver = ogr.GetDriverByName('ESRI Shapefile')
-            farms_copy = ogr_driver.CopyDataSource(farms_file,
-               shapefile_folder.encode('UTF-8'))
-
-            guilds_crop_fields = [r for r in guilds_handler.get_fieldnames() if
-                r[0:4] == 'crp_']
-            LOGGER.debug('Crop fields from Guilds table:%s', guilds_crop_fields)
-
-            # Create a new field for each crop in the copied shapefile.
-            LOGGER.debug('Starting to create necessary crop sum fields in '
-                'the copied shapefile')
-            crops = []
-            for crop in guilds_crop_fields:
-                crop_name = crop[4:]  # Trim off the 'crp_'
-                abbrev_crop_name = crop_name[:4]
-                field_name = abbrev_crop_name + '_sum'
-
-                # Only create a new field if it doesn't exist already.
-                field_index = farms_copy.GetLayer(0).GetFeature(0).GetFieldIndex(field_name)
-                if field_index == -1:
-                    new_field = ogr.FieldDefn(field_name, ogr.OFTReal)
-                    farms_copy.GetLayer(0).CreateField(new_field)
-                    LOGGER.debug('Created crop sum field "%s" for "%s"',
-                        field_name, crop)
-
-                # Regardless of whether it needs to be created, we still need to
-                # keep track of it for later on, when the value of the cell will
-                # be set.
-                crops.append((crop, field_name))
-            LOGGER.debug('Crops/fields: %s', crops)
-
-            LOGGER.info('Starting to aggregate by available farm sites')
-            farms_layer = farms_copy.GetLayer(0)
-            for farm_site in farms_layer:
-                for crop, fieldname in crops:
-                    crop_is_present = farm_site.GetField(crop)
-                    LOGGER.debug('Crop is present: %s', crop_is_present)
-                    LOGGER.debug('Resetting the crop sum to 0')
-                    LOGGER.debug('Resetting the visiting species list to []')
-                    crop_sum = 0
-                    visiting_species = []
-
-                    # The field value is often stored as either 0 or
-                    # some other value, but not necessarily 1.  So here,
-                    # I need to compare the value against 0, not vs. 1.
-                    if crop_is_present != 0:
-                        LOGGER.info('Processing crop %s', crop)
-                        for species in guilds_handler.table:
-                            species_name = species['species']
-                            LOGGER.info('Processing species %s', species_name)
-
-                            species_crop = species[crop]
-                            if species_crop == 1:
-                                visiting_species.append(species_name)
-                                supply_uri = biophysical_args['species'][species_name]['species_abundance']
-                                LOGGER.debug('Supply raster URI="%s"', supply_uri)
-                                pixel_value = get_point(supply_uri, farm_site)[0]
-                                LOGGER.debug(('Crop="%s", species="%s"'
-                                    'pixel_value=%s'), crop, species_name,
-                                    pixel_value)
-                                crop_sum += pixel_value
-
-                    LOGGER.info('Sum across %s for crop "%s": %s',
-                        visiting_species, crop, crop_sum)
-
-                    # Actually set the correct field value in the copied farms
-                    # shapefile using the crop sum.
-                    field_index = farm_site.GetFieldIndex(fieldname)
-                    farm_site.SetField(field_index, crop_sum)
-                    farms_layer.SetFeature(farm_site)
-                    LOGGER.info('Sum saved to the shapefile.')
 
 def build_uri(directory, basename, suffix=[]):
     """Take the input directory and basename, inserting the provided suffixes
