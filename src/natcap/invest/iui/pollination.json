@@ -47,8 +47,8 @@
           "type": "list",
           "elements": [
             {
-              "id": "cur_lulc_raster",
-              "args_id": "landuse_cur_uri",
+              "id": "landuse_uri",
+              "args_id": "landuse_uri",
               "type": "file",
               "label": "Current Land Cover Scenario (Raster)",
               "defaultValue": "../Base_Data/Terrestrial/lulc_samp_cur/hdr.adf",
@@ -102,18 +102,6 @@
                 ]
               },
               "helpText": "A CSV table of land-cover attributes."
-            },
-            {
-              "id": "fut_lulc_raster",
-              "type": "hideableFileEntry",
-              "label": "Calculate Future Scenario (Raster) (Optional)",
-              "args_id": "landuse_fut_uri",
-              "required": false,
-              "defaultValue": "../Base_Data/Terrestrial/lulc_samp_fut/hdr.adf",
-              "validateAs": {
-                "type": "GDAL"
-              },
-              "helpText": "Optional. An GDAL-supported raster file representing a future land-cover scenario.<br/><br/>Providing a future land-cover scenario will cause pollinator supply and abundance to be calculated for both the current and future scenarios.  The future scenario land cover raster should use the same land cover attribute table as the current land cover raster."
             }
           ]
         }

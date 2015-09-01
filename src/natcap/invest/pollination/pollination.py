@@ -26,15 +26,13 @@ def execute(args):
             required to exist on disk.  Additional folders will be created
             inside of this folder.  If there are any file name collisions, this
             model will overwrite those files.
-        args['landuse_cur_uri'] (string): a URI to a GDAL raster on disk.
-            'do_valuation' - A boolean.  Indicates whether valuation should be
+        args['landuse_uri'] (string): a URI to a GDAL raster on disk that
+            represents the landcover map.
+        args['do_valuation'] - A boolean.  Indicates whether valuation should be
             performed.  This applies to all scenarios.
         args['landuse_attributes_uri'] (string): a URI to a CSV on disk.  See
             the model's documentation for details on the structure of this
             table.
-        args['landuse_fut_uri'] (string): (Optional) a URI to a GDAL dataset on
-            disk. If this args dictionary entry is provided, this model will
-            process both the current and future scenarios.
         args['do_valuation'] (boolean): Indicates whether the model should
             include valuation
         args['half_saturation'] (float): a number between 0 and 1 indicating the
@@ -60,7 +58,6 @@ def execute(args):
             'workspace_dir': 'path/to/workspace_dir',
             'landuse_cur_uri': 'path/to/raster',
             'landuse_attributes_uri': 'path/to/csv',
-            'landuse_fut_uri': 'path/to/raster',
             'do_valuation': 'example',
             'half_saturation': 'example',
             'wild_pollination_proportion': 'example',
@@ -72,9 +69,8 @@ def execute(args):
 
     The following args dictionary entries are optional, and
     will affect the behavior of the model if provided:
-        1. landuse_fut_uri
-        2. ag_classes
-        3. results_suffix
+        1. ag_classes
+        2. results_suffix
 
     If args['do_valuation'] is set to True, the following args dictionary
     entries are also required:
@@ -102,140 +98,129 @@ def execute(args):
     out_dir = os.path.join(workspace, 'output')
     pygeoprocessing.create_directories([inter_dir, out_dir])
 
-    # Determine which land cover scenarios we should run, and append the
-    # appropriate suffix to the landuser_scenarios list as necessary for the
-    # scenario.
-    landuse_scenarios = ['cur']
-    if 'landuse_fut_uri' in args:
-        landuse_scenarios.append('fut')
+    LOGGER.info('Starting pollination model')
 
-    for scenario in landuse_scenarios:
-        LOGGER.info('Starting pollination model for the %s scenario', scenario)
+    # Create the args dictionary with a couple of statically defined values.
+    biophysical_args = {
+        'paths': {
+            'workspace': workspace,
+            'intermediate': inter_dir,
+            'output': out_dir,
+            'temp': inter_dir
+        },
+        'do_valuation': args['do_valuation'],
+    }
 
-        # Create the args dictionary with a couple of statically defined values.
-        biophysical_args = {
-            'paths': {
-                'workspace': workspace,
-                'intermediate': inter_dir,
-                'output': out_dir,
-                'temp': inter_dir
-            },
-            'do_valuation': args['do_valuation'],
-        }
+    # If we're doing valuation, we also require certain other parameters to
+    # be present.
+    if args['do_valuation']:
+        for arg in ['half_saturation', 'wild_pollination_proportion']:
+            biophysical_args[arg] = args[arg]
 
-        # If we're doing valuation, we also require certain other parameters to
-        # be present.
-        if args['do_valuation']:
-            for arg in ['half_saturation', 'wild_pollination_proportion']:
-                biophysical_args[arg] = args[arg]
+    biophysical_args['landuse'] = args['landuse_uri']
 
-        # Open the landcover raster
-        uri = args['landuse_' + scenario +'_uri'].encode('utf-8')
-        biophysical_args['landuse'] = uri
+    # Open a Table Handler for the land use attributes table and a different
+    # table handler for the Guilds table.
+    LOGGER.info('Opening landuse attributes table')
+    att_table_handler = fileio.TableHandler(args['landuse_attributes_uri'])
+    biophysical_args['landuse_attributes'] = att_table_handler
 
-        # Open a Table Handler for the land use attributes table and a different
-        # table handler for the Guilds table.
-        LOGGER.info('Opening landuse attributes table')
-        att_table_handler = fileio.TableHandler(args['landuse_attributes_uri'])
-        biophysical_args['landuse_attributes'] = att_table_handler
+    att_table_fields = att_table_handler.get_fieldnames()
+    nesting_fields = [f[2:] for f in att_table_fields if re.match('^n_', f)]
+    floral_fields = [f[2:] for f in att_table_fields if re.match('^f_', f)]
 
-        att_table_fields = att_table_handler.get_fieldnames()
-        nesting_fields = [f[2:] for f in att_table_fields if re.match('^n_', f)]
-        floral_fields = [f[2:] for f in att_table_fields if re.match('^f_', f)]
+    fields_to_check = [
+        (nesting_fields, 'nesting'),
+        (floral_fields, 'floral'),
+    ]
+    for field_list, field_type in fields_to_check:
+        if len(field_list) == 0:
+            raise ValueError(
+                'LULC attribute table must have '
+                ' %s fields but none were found.' % field_type)
 
-        fields_to_check = [
-            (nesting_fields, 'nesting'),
-            (floral_fields, 'floral'),
-        ]
-        for field_list, field_type in fields_to_check:
-            if len(field_list) == 0:
-                raise ValueError(
-                    'LULC attribute table must have '
-                    ' %s fields but none were found.' % field_type)
+    biophysical_args['nesting_fields'] = nesting_fields
+    biophysical_args['floral_fields'] = floral_fields
 
-        biophysical_args['nesting_fields'] = nesting_fields
-        biophysical_args['floral_fields'] = floral_fields
+    LOGGER.info('Opening guilds table')
+    att_table_handler.set_field_mask('(^n_)|(^f_)', trim=2)
+    guilds_handler = fileio.TableHandler(args['guilds_uri'])
+    guilds_handler.set_field_mask('(^ns_)|(^fs_)', trim=3)
+    biophysical_args['guilds'] = guilds_handler
 
-        LOGGER.info('Opening guilds table')
-        att_table_handler.set_field_mask('(^n_)|(^f_)', trim=2)
-        guilds_handler = fileio.TableHandler(args['guilds_uri'])
-        guilds_handler.set_field_mask('(^ns_)|(^fs_)', trim=3)
-        biophysical_args['guilds'] = guilds_handler
+    biophysical_args['nesting_fields'] = nesting_fields
+    biophysical_args['floral_fields'] = floral_fields
 
-        biophysical_args['nesting_fields'] = nesting_fields
-        biophysical_args['floral_fields'] = floral_fields
+    # Convert agricultural classes (a space-separated list of ints) into a
+    # list of ints.  If the user has not provided a string list of ints,
+    # then use an empty list instead.
+    LOGGER.info('Processing agricultural classes')
+    try:
+        # This approach will create a list with only ints, even if the user
+        # has accidentally entered additional spaces.  Any other incorrect
+        # input will throw a ValueError exception.
+        user_ag_list = args['ag_classes'].split(' ')
+        ag_class_list = [int(r) for r in user_ag_list if r != '']
+    except KeyError:
+        # If the 'ag_classes' key is not present in the args dictionary,
+        # use an empty list in its stead.
+        ag_class_list = []
 
-        # Convert agricultural classes (a space-separated list of ints) into a
-        # list of ints.  If the user has not provided a string list of ints,
-        # then use an empty list instead.
-        LOGGER.info('Processing agricultural classes')
-        try:
-            # This approach will create a list with only ints, even if the user
-            # has accidentally entered additional spaces.  Any other incorrect
-            # input will throw a ValueError exception.
-            user_ag_list = args['ag_classes'].split(' ')
-            ag_class_list = [int(r) for r in user_ag_list if r != '']
-        except KeyError:
-            # If the 'ag_classes' key is not present in the args dictionary,
-            # use an empty list in its stead.
-            ag_class_list = []
+    biophysical_args['ag_classes'] = ag_class_list
 
-        biophysical_args['ag_classes'] = ag_class_list
+    # Defined which rasters need to be created at the global level (at the
+    # top level of the model dictionary).  the global_rasters list has this
+    # structure:
+    #   (model_args key, raster_uri base, folder to be saved to)
+    global_rasters = [
+        ('foraging_total', 'frm_tot', out_dir),
+        ('foraging_average', 'frm_avg', out_dir),
+        ('farm_value_sum', 'frm_val_sum', inter_dir),
+        ('service_value_sum', 'sup_val_sum', out_dir),
+        ('abundance_total', 'sup_tot', out_dir),
+        ('ag_map', 'agmap', inter_dir)]
 
-        # Defined which rasters need to be created at the global level (at the
-        # top level of the model dictionary).  the global_rasters list has this
-        # structure:
-        #   (model_args key, raster_uri base, folder to be saved to)
-        global_rasters = [
-            ('foraging_total', 'frm_tot', out_dir),
-            ('foraging_average', 'frm_avg', out_dir),
-            ('farm_value_sum', 'frm_val_sum', inter_dir),
-            ('service_value_sum', 'sup_val_sum', out_dir),
-            ('abundance_total', 'sup_tot', out_dir),
-            ('ag_map', 'agmap', inter_dir)]
+    # loop through the global rasters provided and actually create the uris,
+    # saving them to the model args dictionary.
+    LOGGER.info('Creating top-level raster URIs')
+    for key, base, folder in global_rasters:
+        raster_uri = os.path.join(folder, '%s%s.tif' % (base, file_suffix))
+        biophysical_args[key] = raster_uri
 
-        # loop through the global rasters provided and actually create the uris,
-        # saving them to the model args dictionary.
-        LOGGER.info('Creating top-level raster URIs')
-        for key, base, folder in global_rasters:
-            raster_uri = os.path.join(folder, '%s%s.tif' % (base, file_suffix))
-            biophysical_args[key] = raster_uri
+    # Fetch a list of all species from the guilds table.
+    species_list = [row['species'] for row in guilds_handler.table]
 
-        # Fetch a list of all species from the guilds table.
-        species_list = [row['species'] for row in guilds_handler.table]
+    # Make new rasters for each species.  In this list of tuples, the first
+    # value of each tuple is the args dictionary key, and the second value
+    # of each tuple is the raster prefix.  The third value is the folder in
+    # which the created raster should exist.
+    species_rasters = [
+        ('nesting', 'hn', inter_dir),
+        ('floral', 'hf', inter_dir),
+        ('species_abundance', 'sup', inter_dir),
+        ('farm_abundance', 'frm', inter_dir),
+        ('farm_value', 'frm_val', inter_dir),
+        ('value_abundance_ratio', 'val_sup_ratio', inter_dir),
+        ('value_abundance_ratio_blur', 'val_sup_ratio_blur', inter_dir),
+        ('service_value', 'sup_val', inter_dir)]
 
-        # Make new rasters for each species.  In this list of tuples, the first
-        # value of each tuple is the args dictionary key, and the second value
-        # of each tuple is the raster prefix.  The third value is the folder in
-        # which the created raster should exist.
-        species_rasters = [
-            ('nesting', 'hn', inter_dir),
-            ('floral', 'hf', inter_dir),
-            ('species_abundance', 'sup', inter_dir),
-            ('farm_abundance', 'frm', inter_dir),
-            ('farm_value', 'frm_val', inter_dir),
-            ('value_abundance_ratio', 'val_sup_ratio', inter_dir),
-            ('value_abundance_ratio_blur', 'val_sup_ratio_blur', inter_dir),
-            ('service_value', 'sup_val', inter_dir)]
+    # Loop through each species and define the necessary raster URIs, as
+    # defined by the species_rasters list.
+    LOGGER.info('Creating species-specific raster URIs')
+    biophysical_args['species'] = {}
+    for species in species_list:
+        # Casting to UTF-8 so that LOGGER won't crash if species is UTF-8
+        species = unicode(species, "utf-8")
+        LOGGER.info('Creating rasters for %s', species)
+        biophysical_args['species'][species] = {}
+        for group, prefix, folder in species_rasters:
+            raster_name = prefix + '_' + species + '.tif'
+            raster_uri = os.path.join(
+                folder, '%s%s.tif' % (
+                    raster_name, file_suffix))
+            biophysical_args['species'][species][group] = raster_uri
 
-        # Loop through each species and define the necessary raster URIs, as
-        # defined by the species_rasters list.
-        LOGGER.info('Creating species-specific raster URIs')
-        biophysical_args['species'] = {}
-        for species in species_list:
-            # Casting to UTF-8 so that LOGGER won't crash if species is UTF-8
-            species = unicode(species, "utf-8")
-            LOGGER.info('Creating rasters for %s', species)
-            biophysical_args['species'][species] = {}
-            for group, prefix, folder in species_rasters:
-                raster_name = prefix + '_' + species + '.tif'
-                raster_uri = os.path.join(
-                    folder, '%s_%s%s.tif' % (
-                        raster_name, scenario, file_suffix))
-
-                biophysical_args['species'][species][group] = raster_uri
-
-        execute_model(biophysical_args)
+    execute_model(biophysical_args)
 
 
 def execute_model(args):
