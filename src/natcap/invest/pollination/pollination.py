@@ -4,6 +4,7 @@ import os
 import logging
 import re
 import shutil
+import collections
 
 import numpy
 from osgeo import osr
@@ -100,56 +101,27 @@ def execute(args):
 
     LOGGER.info('Starting pollination model')
 
-    # Create the args dictionary with a couple of statically defined values.
-    biophysical_args = {
-        'paths': {
-            'workspace': workspace,
-            'intermediate': inter_dir,
-            'output': out_dir,
-            'temp': inter_dir
-        },
-        'do_valuation': args['do_valuation'],
-    }
-
-    # If we're doing valuation, we also require certain other parameters to
-    # be present.
-    if args['do_valuation']:
-        for arg in ['half_saturation', 'wild_pollination_proportion']:
-            biophysical_args[arg] = args[arg]
-
-    biophysical_args['landuse'] = args['landuse_uri']
-
     # Open a Table Handler for the land use attributes table and a different
     # table handler for the Guilds table.
     LOGGER.info('Opening landuse attributes table')
-    att_table_handler = fileio.TableHandler(args['landuse_attributes_uri'])
-    biophysical_args['landuse_attributes'] = att_table_handler
 
-    att_table_fields = att_table_handler.get_fieldnames()
-    nesting_fields = [f[2:] for f in att_table_fields if re.match('^n_', f)]
-    floral_fields = [f[2:] for f in att_table_fields if re.match('^f_', f)]
-
-    fields_to_check = [
-        (nesting_fields, 'nesting'),
-        (floral_fields, 'floral'),
-    ]
+    land_attribute_table = pygeoprocessing.get_lookup_from_table(
+        args['landuse_attributes_uri'], 'lulc')
+    attribute_table_fields = land_attribute_table.itervalues().next().keys()
+    nesting_fields = [
+        f[2:] for f in attribute_table_fields if re.match('^n_', f)]
+    floral_fields = [
+        f[2:] for f in attribute_table_fields if re.match('^f_', f)]
+    fields_to_check = [(nesting_fields, 'nesting'), (floral_fields, 'floral')]
     for field_list, field_type in fields_to_check:
         if len(field_list) == 0:
             raise ValueError(
                 'LULC attribute table must have '
                 ' %s fields but none were found.' % field_type)
 
-    biophysical_args['nesting_fields'] = nesting_fields
-    biophysical_args['floral_fields'] = floral_fields
-
     LOGGER.info('Opening guilds table')
-    att_table_handler.set_field_mask('(^n_)|(^f_)', trim=2)
-    guilds_handler = fileio.TableHandler(args['guilds_uri'])
-    guilds_handler.set_field_mask('(^ns_)|(^fs_)', trim=3)
-    biophysical_args['guilds'] = guilds_handler
-
-    biophysical_args['nesting_fields'] = nesting_fields
-    biophysical_args['floral_fields'] = floral_fields
+    guilds_table = pygeoprocessing.get_lookup_from_table(
+        args['guilds_uri'], 'species')
 
     # Convert agricultural classes (a space-separated list of ints) into a
     # list of ints.  If the user has not provided a string list of ints,
@@ -166,8 +138,6 @@ def execute(args):
         # use an empty list in its stead.
         ag_class_list = []
 
-    biophysical_args['ag_classes'] = ag_class_list
-
     # Defined which rasters need to be created at the global level (at the
     # top level of the model dictionary).  the global_rasters list has this
     # structure:
@@ -182,13 +152,15 @@ def execute(args):
 
     # loop through the global rasters provided and actually create the uris,
     # saving them to the model args dictionary.
-    LOGGER.info('Creating top-level raster URIs')
-    for key, base, folder in global_rasters:
-        raster_uri = os.path.join(folder, '%s%s.tif' % (base, file_suffix))
-        biophysical_args[key] = raster_uri
+    LOGGER.info('Creating top-level raster URI paths')
+    global_raster_uris = {}
+    for raster_id, basename, directory in global_rasters:
+        raster_uri = os.path.join(
+            directory, '%s%s.tif' % (basename, file_suffix))
+        global_raster_uris[raster_id] = raster_uri
 
     # Fetch a list of all species from the guilds table.
-    species_list = [row['species'] for row in guilds_handler.table]
+    species_list = guilds_table.keys()
 
     # Make new rasters for each species.  In this list of tuples, the first
     # value of each tuple is the args dictionary key, and the second value
@@ -207,81 +179,24 @@ def execute(args):
     # Loop through each species and define the necessary raster URIs, as
     # defined by the species_rasters list.
     LOGGER.info('Creating species-specific raster URIs')
-    biophysical_args['species'] = {}
+    species_raster_uris = collections.defaultdict(dict)
     for species in species_list:
-        # Casting to UTF-8 so that LOGGER won't crash if species is UTF-8
-        species = unicode(species, "utf-8")
+        if not isinstance(species, unicode):
+            # Casting to UTF-8 so that LOGGER won't crash if species is UTF-8
+            species = unicode(species, "utf-8")
         LOGGER.info('Creating rasters for %s', species)
-        biophysical_args['species'][species] = {}
         for group, prefix, folder in species_rasters:
-            raster_name = prefix + '_' + species + '.tif'
             raster_uri = os.path.join(
-                folder, '%s%s.tif' % (
-                    raster_name, file_suffix))
-            biophysical_args['species'][species][group] = raster_uri
-
-    execute_model(biophysical_args)
-
-
-def execute_model(args):
-    """Execute the biophysical component of the pollination model.
-
-        args - a python dictionary with at least the following entries:
-            'landuse' - a URI to a GDAL dataset
-            'landuse_attributes' - A fileio AbstractTableHandler object
-            'guilds' - A fileio AbstractTableHandler object
-            'ag_classes' - a python list of ints representing agricultural
-                classes in the landuse map.  This list may be empty to represent
-                the fact that no landuse classes are to be designated as strictly
-                agricultural.
-            'nesting_fields' - a python list of string nesting fields
-            'floral fields' - a python list of string floral fields
-            'do_valuation' - a boolean indicating whether to do valuation
-            'paths' - a dictionary with the following entries:
-                'workspace' - the workspace path
-                'intermediate' - the intermediate folder path
-                'output' - the output folder path
-                'temp' - a temp folder path.
-
-        Additionally, the args dictionary should contain these URIs, which must
-        all be python strings of either type str or else utf-8 encoded unicode.
-            'ag_map' - a URI
-            'foraging_average' - a URI
-            'abundance_total' - a URI
-            'farm_value_sum' - a URI (Required if do_valuation == True)
-            'service_value_sum' - a URI (Required if do_valuation == True)
-
-        The args dictionary must also have a dictionary containing
-        species-specific information:
-            'species' - a python dictionary with a contained dictionary for each
-                species to be considered by the model.  The key to each
-                dictionary should be the species name.  For example:
-
-                    args['species']['Apis'] = { ... species_dictionary ... }
-
-                The species-specific dictionary must contain these elements:
-                    'floral' - a URI
-                    'nesting' - a URI
-                    'species_abundance' - a URI
-                    'farm_abundance' - a URI
-
-                If do_valuation == True, the following entries are also required
-                to be in the species-specific dictionary:
-                    'farm_value' - a URI
-                    'value_abundance_ratio' - a URI
-                    'value_abundance_ratio_blurred' - a URI
-                    'service_value' - a URI
-
-        returns nothing."""
+                folder, '%s_%s%s.tif' % (prefix, species, file_suffix))
+            species_raster_uris[species][group] = raster_uri
 
     nodata = -1.0
-
+    # TODO: ******LEFT OFF HERE*********
     reclass_ag_raster(
         args['landuse'], args['ag_map'], args['ag_classes'], nodata)
 
     # Create the necessary sum rasters by reclassifying the ag map so that all
     # pixels that are not nodata have a value of 0.0.
-
     output_uri_list = [args['foraging_average'], args['abundance_total']]
     if args['do_valuation']:
         output_uri_list.extend(
@@ -302,7 +217,7 @@ def execute_model(args):
     # Loop through all species and perform the necessary calculations.
     for species, species_dict in args['species'].iteritems():
         # We need the guild dictionary for a couple different things later on
-        guild_dict = args['guilds'].get_table_row('species', species)
+        guild_dict = args['guilds'][species]
 
         # Calculate species abundance.  This represents the relative index of
         # how much of a species we can expect to find across the landscape given
@@ -750,13 +665,13 @@ def divide_raster(raster, divisor, uri):
         shutil.move(uri, old_out_uri)
 
 
-def map_attribute(base_raster, attr_table, guild_dict, resource_fields,
+def map_attribute(base_raster, lu_table_dict, guild_dict, resource_fields,
                   out_uri, list_op):
     """Make an intermediate raster where values are mapped from the base raster
         according to the mapping specified by key_field and value_field.
 
         base_raster - a URI to a GDAL dataset
-        attr_table - a subclass of fileio.AbstractTableHandler
+        lu_table_dict - a subclass of fileio.AbstractTableHandler
         guild_dict - a python dictionary representing the guild row for this
             species.
         resource_fields - a python list of string resource fields
@@ -768,11 +683,8 @@ def map_attribute(base_raster, attr_table, guild_dict, resource_fields,
 
     # Get the input raster's nodata value
     base_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(base_raster)
-
-    # Get the output raster's nodata value
-
-    lu_table_dict = attr_table.get_table_dictionary('lulc')
-
+    LOGGER.debug(resource_fields)
+    LOGGER.debug(guild_dict)
     value_list = dict((r, guild_dict[r]) for r in resource_fields)
 
     reclass_rules = {base_nodata: -1}
