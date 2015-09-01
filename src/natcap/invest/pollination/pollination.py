@@ -21,36 +21,38 @@ def execute(args):
     """
     Execute the pollination model from the topmost, user-accessible level.
 
-    Args:
-        workspace_dir (string): a URI to the workspace folder.  Not required to
-            exist on disk.  Additional folders will be created inside of
-            this folder.  If there are any file name collisions, this model
-            will overwrite those files.
-        landuse_cur_uri (string): a URI to a GDAL raster on disk.
+    Parameters:
+        args['workspace_dir'] (string): a URI to the workspace folder.  Not
+            required to exist on disk.  Additional folders will be created
+            inside of this folder.  If there are any file name collisions, this
+            model will overwrite those files.
+        args['landuse_cur_uri'] (string): a URI to a GDAL raster on disk.
             'do_valuation' - A boolean.  Indicates whether valuation should be
             performed.  This applies to all scenarios.
-        landuse_attributes_uri (string): a URI to a CSV on disk.  See the
-            model's documentation for details on the structure of this
+        args['landuse_attributes_uri'] (string): a URI to a CSV on disk.  See
+            the model's documentation for details on the structure of this
             table.
-        landuse_fut_uri (string): (Optional) a URI to a GDAL dataset on disk.
-            If this args dictionary entry is provided, this model will process
-            both the current and future scenarios.
-        do_valuation (boolean): Indicates whether the model should include
-            valuation
-        half_saturation (float): a number between 0 and 1 indicating the
+        args['landuse_fut_uri'] (string): (Optional) a URI to a GDAL dataset on
+            disk. If this args dictionary entry is provided, this model will
+            process both the current and future scenarios.
+        args['do_valuation'] (boolean): Indicates whether the model should
+            include valuation
+        args['half_saturation'] (float): a number between 0 and 1 indicating the
             half-saturation constant. See the pollination documentation for
             more information.
-        wild_pollination_proportion (float): a number between 0 and 1
+        args['wild_pollination_proportion'] (float): a number between 0 and 1
             indicating the proportion of all pollinators that are wild.
             See the pollination documentation for more information.
-        guilds_uri (string): a URI to a CSV on disk.  See the model's
+        args['guilds_uri'] (string): a URI to a CSV on disk.  See the model's
             documentation for details on the structure of this table.
-        ag_classes (string): (Optional) a space-separated list of land cover
-            classes that are to be considered as agricultural.  If this
+        args['ag_classes'] (string): (Optional) a space-separated list of land
+            cover classes that are to be considered as agricultural.  If this
             input is not provided, all land cover classes are considered to
             be agricultural.
-        results_suffix (string): inserted into the URI of each file created by
-            this model, right before the file extension.
+        args['farms_shapefile'] (string): (Optional) shapefile containing points
+            representing data collection points on the landscape.
+        args['results_suffix'] (string): inserted into the URI of each file
+            created by this model, right before the file extension.
 
     Example Args Dictionary::
 
@@ -98,9 +100,7 @@ def execute(args):
     # folder in the filesystem.
     inter_dir = os.path.join(workspace, 'intermediate')
     out_dir = os.path.join(workspace, 'output')
-    for folder in [inter_dir, out_dir]:
-        if not os.path.isdir(folder):
-            os.makedirs(folder)
+    pygeoprocessing.create_directories([inter_dir, out_dir])
 
     # Determine which land cover scenarios we should run, and append the
     # appropriate suffix to the landuser_scenarios list as necessary for the
@@ -546,6 +546,8 @@ def reclass_ag_raster(landuse_uri, out_uri, ag_classes, nodata):
 
         Returns nothing."""
 
+    # TODO: This is really creating an agriculture mask, rename it and change
+    # the functionality to reflect that
     LOGGER.info(
         'Starting to create an ag raster at %s. Nodata=%s', out_uri, nodata)
     if len(ag_classes) > 0:
