@@ -148,7 +148,7 @@ def execute(args):
         ('farm_value_sum', 'frm_val_sum', inter_dir),
         ('service_value_sum', 'sup_val_sum', out_dir),
         ('abundance_total', 'sup_tot', out_dir),
-        ('ag_map', 'agmap', inter_dir)]
+        ('ag_mask', 'agmap', inter_dir)]
 
     # loop through the global rasters provided and actually create the uris,
     # saving them to the model args dictionary.
@@ -190,43 +190,23 @@ def execute(args):
                 folder, '%s_%s%s.tif' % (prefix, species, file_suffix))
             species_raster_uris[species][group] = raster_uri
 
-    nodata = -1.0
-    # TODO: ******LEFT OFF HERE*********
-    reclass_ag_raster(
-        args['landuse'], args['ag_map'], args['ag_classes'], nodata)
-
-    # Create the necessary sum rasters by reclassifying the ag map so that all
-    # pixels that are not nodata have a value of 0.0.
-    output_uri_list = [args['foraging_average'], args['abundance_total']]
-    if args['do_valuation']:
-        output_uri_list.extend(
-            [args['farm_value_sum'], args['service_value_sum']])
-
-    ag_map_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(
-        args['ag_map'])
-    def mask_op(ag_value):
-        """return 0.0 where not original nodata, and 0.0 otherwise"""
-        return numpy.where(ag_value == ag_map_nodata, nodata, 0.0)
-    pixel_size_out = pygeoprocessing.geoprocessing.get_cell_size_from_uri(
-        args['ag_map'])
-    for out_uri in output_uri_list:
-        pygeoprocessing.geoprocessing.vectorize_datasets(
-            [args['ag_map']], mask_op, out_uri, gdal.GDT_Float32, nodata,
-            pixel_size_out, 'intersection', vectorize_op=False)
+    create_ag_mask(
+        args['landuse_uri'], global_raster_uris['ag_mask'], args['ag_classes'])
 
     # Loop through all species and perform the necessary calculations.
-    for species, species_dict in args['species'].iteritems():
-        # We need the guild dictionary for a couple different things later on
-        guild_dict = args['guilds'][species]
+    for species, species_dict in guilds_table.iteritems():
+        LOGGER.debug(species)
+        LOGGER.debug(species_dict)
 
         # Calculate species abundance.  This represents the relative index of
         # how much of a species we can expect to find across the landscape given
         # the floral and nesting patterns (based on land cover) and the
         # specified use of these resources (defined in the guild_dict).
         LOGGER.info('Calculating %s abundance on the landscape', species)
-        calculate_abundance(
-            args['landuse'], args['landuse_attributes'], guild_dict,
-            args['nesting_fields'], args['floral_fields'], uris={
+        LOGGER.debug(land_attribute_table)
+        calculate_species_abundance_index(
+            args['landuse_uri'], land_attribute_table, species_dict,
+            nesting_fields, floral_fields, uris={
                 'nesting': species_dict['nesting'],
                 'floral': species_dict['floral'],
                 'species_abundance': species_dict['species_abundance'],
@@ -245,7 +225,7 @@ def execute(args):
         LOGGER.info('Calculating %s abundance on farms ("foraging")', species)
         calculate_farm_abundance(
             species_dict['species_abundance'],
-            args['ag_map'], guild_dict['alpha'], species_dict['farm_abundance'])
+            args['ag_mask'], guild_dict['alpha'], species_dict['farm_abundance'])
 
         # Add the newly calculated farm abundance raster to the total.
         LOGGER.info('Adding %s foraging abundance raster to total', species)
@@ -279,7 +259,7 @@ def execute(args):
                     'farm_value': species_dict['farm_value'],
                     'farm_abundance': species_dict['farm_abundance'],
                     'species_abundance': species_dict['species_abundance'],
-                    'ag_map': args['ag_map']
+                    'ag_mask': args['ag_mask']
                 },
                 nodata=-1.0,
                 alpha=float(guild_dict['alpha']),
@@ -313,12 +293,12 @@ def execute(args):
     divide_raster(args['abundance_total'], num_species, args['abundance_total'])
 
 
-def calculate_abundance(
-        landuse, lu_attr, guild, nesting_fields, floral_fields, uris):
+def calculate_species_abundance_index(
+        landuse_uri, lu_attr, guild, nesting_fields, floral_fields, uris):
     """Calculate pollinator abundance on the landscape.  The calculated
     pollinator abundance raster will be created at uris['species_abundance'].
 
-        landuse - a URI to a GDAL dataset of the LULC.
+        landuse_uri - a URI to a GDAL dataset of the LULC.
         lu_attr - a TableHandler
         guild - a dictionary containing information about the pollinator.  All
             entries are required:
@@ -351,13 +331,13 @@ def calculate_abundance(
 
     floral_raster_temp_uri = pygeoprocessing.geoprocessing.temporary_filename()
     map_attribute(
-        landuse, lu_attr, guild, floral_fields, floral_raster_temp_uri, sum)
-    map_attribute(landuse, lu_attr, guild, nesting_fields, uris['nesting'], max)
+        landuse_uri, lu_attr, guild, floral_fields, floral_raster_temp_uri, sum)
+    map_attribute(landuse_uri, lu_attr, guild, nesting_fields, uris['nesting'], max)
 
     # Now that the per-pixel nesting and floral resources have been
     # calculated, the floral resources still need to factor in
     # neighborhoods.
-    lulc_ds = gdal.Open(landuse)
+    lulc_ds = gdal.Open(landuse_uri)
     pixel_size = abs(lulc_ds.GetGeoTransform()[1])
     lulc_ds = None
     expected_distance = guild['alpha'] / pixel_size
@@ -392,12 +372,12 @@ def calculate_abundance(
         vectorize_op=False)
 
 
-def calculate_farm_abundance(species_abundance, ag_map, alpha, uri):
+def calculate_farm_abundance(species_abundance, ag_mask, alpha, uri):
     """Calculate the farm abundance raster.  The final farm abundance raster
     will be saved to uri.
 
         species_abundance - a URI to a GDAL dataset of species abundance.
-        ag_map - a uri to a GDAL dataset of values where ag pixels are 1
+        ag_mask - a uri to a GDAL dataset of values where ag pixels are 1
             and non-ag pixels are 0.
         alpha - the typical foraging distance of the current pollinator.
         uri - the output URI for the farm_abundance raster.
@@ -424,7 +404,7 @@ def calculate_farm_abundance(species_abundance, ag_map, alpha, uri):
     # agricultural.  If the pixel is agricultural, the value is preserved.
     # Otherwise, the value is set to nodata.
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list=[farm_abundance_temp_uri, ag_map],
+        dataset_uri_list=[farm_abundance_temp_uri, ag_mask],
         dataset_pixel_op=lambda x, y: numpy.where(y == 1.0, x, nodata),
         dataset_out_uri=uri,
         datatype_out=gdal.GDT_Float32,
@@ -433,40 +413,35 @@ def calculate_farm_abundance(species_abundance, ag_map, alpha, uri):
         bounding_box_mode='intersection',
         vectorize_op=False)
 
-def reclass_ag_raster(landuse_uri, out_uri, ag_classes, nodata):
+def create_ag_mask(landuse_uri, out_uri, ag_classes):
     """Reclassify the landuse raster into a raster demarcating the agricultural
-        state of a given pixel.  The reclassed ag raster will be saved to uri.
+    state of a given pixel.  The reclassed ag raster will be saved to uri.
 
-        landuse - a GDAL dataset.  The land use/land cover raster.
-        out_uri - the uri of the output, reclassified ag raster.
-        ag_classes - a list of landuse classes that are agricultural.  If an
-            empty list is provided, all landcover classes are considered to be
-            agricultural.
-        nodata - an int or float.
+    Parameters:
 
-        Returns nothing."""
+        landuse_uri (string): a path to the landcover raster.
+        out_uri (string): a path to the ouput mask raster
+        ag_classes (string): an integer list of landuse classes that could be
+            found in `landuse_uri` that are agricultural.
 
-    # TODO: This is really creating an agriculture mask, rename it and change
-    # the functionality to reflect that
-    LOGGER.info(
-        'Starting to create an ag raster at %s. Nodata=%s', out_uri, nodata)
-    if len(ag_classes) > 0:
-        reclass_rules = dict((r, 1) for r in ag_classes)
-        default_value = 0.0
-    else:
-        reclass_rules = {}
-        default_value = 1.0
+    Returns:
+        None"""
 
-    lulc_values = pygeoprocessing.geoprocessing.unique_raster_values_uri(
-        landuse_uri)
+    lulc_nodata = pygeoprocessing.get_nodata_from_uri(landuse_uri)
+    ag_mask_nodata = 2
+    pixel_size_out = pygeoprocessing.get_cell_size_from_uri(landuse_uri)
+    def mask_ag_op(lulc_array):
+        """Masks lulc array by ag class and preserves nodata"""
+        ag_mask = numpy.in1d(lulc_array.flatten(), ag_classes).reshape(
+            lulc_array.shape)
+        result = numpy.zeros(lulc_array.shape, dtype=numpy.int8)
+        result[ag_mask] = 1
+        result[lulc_array == lulc_nodata] = ag_mask_nodata
+        return result
 
-    for lucode in lulc_values:
-        if lucode not in reclass_rules:
-            reclass_rules[lucode] = default_value
-
-    pygeoprocessing.geoprocessing.reclassify_dataset_uri(
-        landuse_uri, reclass_rules, out_uri, gdal.GDT_Float32, nodata,
-        exception_flag='values_required')
+    pygeoprocessing.vectorize_datasets(
+        [landuse_uri], mask_ag_op, out_uri, gdal.GDT_Byte, ag_mask_nodata,
+        pixel_size_out, "intersection", vectorize_op=False)
 
 
 def add_two_rasters(raster_1, raster_2, out_uri):
@@ -520,7 +495,7 @@ def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
             'farm_value' - a GDAL dataset.
             'farm_abundance' - a GDAL dataset.
             'species_abundance' - a GDAL dataset.
-            'ag_map' - a GDAL dataset.  Values are either nodata, 0 (if not an
+            'ag_mask' - a GDAL dataset.  Values are either nodata, 0 (if not an
                     ag pixel) or 1 (if an ag pixel).
         nodata - the nodata value for output rasters.
         alpha - the expected distance
@@ -579,7 +554,7 @@ def calculate_service(rasters, nodata, alpha, part_wild, out_uris):
 
     # Set all agricultural pixels to 0.  This is according to issue 761.
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list=[rasters['ag_map'], temp_service_uri],
+        dataset_uri_list=[rasters['ag_mask'], temp_service_uri],
         dataset_pixel_op=lambda x, y: numpy.where(x == 0, 0.0, y),
         dataset_out_uri=out_uris['service_value'],
         datatype_out=gdal.GDT_Float32,
