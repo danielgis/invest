@@ -294,11 +294,16 @@ def execute(args):
 
 
 def calculate_species_abundance_index(
-        landuse_uri, lu_attr, guild, nesting_fields, floral_fields, uris):
+        landuse_uri, nesting_suitability_table, floral_resources_table,
+        species_abundance_uri):
     """Calculate pollinator abundance on the landscape.  The calculated
-    pollinator abundance raster will be created at uris['species_abundance'].
+    pollinator abundance raster will be created at `species_abundance_uri`
 
-        landuse_uri - a URI to a GDAL dataset of the LULC.
+    Parameters:
+        landuse_uri (string): a path to a GDAL dataset of the LULC
+        nesting_suitability_table(dict): maps lucodes from `landuse_uri` to
+
+
         lu_attr - a TableHandler
         guild - a dictionary containing information about the pollinator.  All
             entries are required:
