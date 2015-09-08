@@ -4,10 +4,10 @@ matplotlib
 natcap.versioner>=0.2.4
 numpy
 poster
-pyamg
+pyamg>=2.2.1
 pygeoprocessing==0.3.0a7
 pyyaml
-scipy
+scipy>=0.14.0
 setuptools
 shapely
 six>=1.3
