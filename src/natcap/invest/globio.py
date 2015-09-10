@@ -17,58 +17,62 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 
 LOGGER = logging.getLogger('natcap.invest.globio.globio')
 
+
 def execute(args):
     """Main entry point for GLOBIO model.
 
-        The model operates in two modes.  Mode (a) generates a landcover map
-            based on a base landcover map and information about crop yields,
-            infrastructure, and more.  Mode (b) assumes the globio landcover
-            map is generated.  These modes are used below to describe input
-            parameters.
+    The model operates in two modes.  Mode (a) generates a landcover map
+    based on a base landcover map and information about crop yields,
+    infrastructure, and more.  Mode (b) assumes the globio landcover
+    map is generated.  These modes are used below to describe input
+    parameters.
 
-        args['workspace_dir'] - (string) output directory for intermediate,
+    Parameters:
+
+        args['workspace_dir'] (string): output directory for intermediate,
             temporary, and final files
-        args['predefined_globio'] - (boolean) if True then "mode (b)" else
+        args['predefined_globio'] (boolean): if True then "mode (b)" else
             "mode (a)"
-        args['results_suffix'] - (optional) (string) string to append to any
+        args['results_suffix'] (string): (optional) string to append to any
             output files
-        args['lulc_uri'] - (string) used in "mode (a)" path to a base landcover
+        args['lulc_uri'] (string): used in "mode (a)" path to a base landcover
             map with integer codes
-        args['lulc_to_globio_table_uri'] - (string) used in "mode (a)" path to
+        args['lulc_to_globio_table_uri'] (string): used in "mode (a)" path to
             table that translates the land-cover args['lulc_uri'] to
             intermediate GLOBIO classes, from which they will be further
-            differentiated using the additional data in the model.
+            differentiated using the additional data in the model.  Contains
+            at least the following fields:
 
-                'lucode': Land use and land cover class code of the dataset
-                    used. LULC codes match the 'values' column in the LULC
-                    raster of mode (b) and must be numeric and unique.
-                'globio_lucode': The LULC code corresponding to the GLOBIO class
-                    to which it should be converted, using intermediate codes
-                    described in the example below.
+            'lucode': Land use and land cover class code of the dataset
+                used. LULC codes match the 'values' column in the LULC
+                raster of mode (b) and must be numeric and unique.
+            'globio_lucode': The LULC code corresponding to the GLOBIO class
+                to which it should be converted, using intermediate codes
+                described in the example below.
 
-        args['infrastructure_dir'] - (string) used in "mode (a)" a path to a
+        args['infrastructure_dir'] (string): used in "mode (a)" a path to a
             folder containing maps of any forms of infrastructure to
-            consider in the calculation of MSAI. These data may be in either
+            consider in the calculation of MSA. These data may be in either
             raster or vector format.
-        args['pasture_uri'] - (string) used in "mode (a)" path to pasture raster
-        args['potential_vegetation_uri'] - (string) used in "mode (a)" path to
+        args['pasture_uri'] (string): used in "mode (a)" path to pasture raster
+        args['potential_vegetation_uri'] (string): used in "mode (a)" path to
             potential vegetation raster
-        args['intensification_uri'] - (string) used in "mode (a)" a path to
-            intensification raster
-        args['pasture_threshold'] - (float) used in "mode (a)"
-        args['intensification_threshold'] - (float) used in "mode (a)"
-        args['primary_threshold'] - (float) used in "mode (a)"
-        args['msa_parameters_uri'] - (string) path to MSA classification
+        args['pasture_threshold'] (float): used in "mode (a)"
+        args['intensification_fraction'] (float): used in "mode (a)"
+        args['primary_threshold'] (float): used in "mode (a)"
+        args['msa_parameters_uri'] (string): path to MSA classification
             parameters
-        args['aoi_uri'] - (string) (optional) if it exists then final MSA raster
+        args['aoi_uri'] (string): (optional) if it exists then final MSA raster
             is summarized by AOI
-        args['globio_lulc_uri'] - (string) used in "mode (b)" path to predefined
+        args['globio_lulc_uri'] (string): used in "mode (b)" path to predefined
             globio raster.
-    """
+    Returns:
+        None"""
 
-    msa_parameter_table = load_msa_parameter_table(args['msa_parameters_uri'])
+    msa_parameter_table = load_msa_parameter_table(
+        args['msa_parameters_uri'], float(args['intensification_fraction']))
 
-    #append a _ to the suffix if it's not empty and doens't already have one
+    #append a _ to the suffix if it's not empty and doesn't already have one
     try:
         file_suffix = args['results_suffix']
         if file_suffix != "" and not file_suffix.startswith('_'):
@@ -77,8 +81,9 @@ def execute(args):
         file_suffix = ''
 
     #create working directories
-    output_dir = os.path.join(args['workspace_dir'], 'output')
-    intermediate_dir = os.path.join(args['workspace_dir'], 'intermediate')
+    output_dir = os.path.join(args['workspace_dir'])
+    intermediate_dir = os.path.join(
+        args['workspace_dir'], 'intermediate_outputs')
     tmp_dir = os.path.join(args['workspace_dir'], 'tmp')
 
     pygeoprocessing.geoprocessing.create_directories(
@@ -113,8 +118,7 @@ def execute(args):
                         infrastructure_filenames[-1]))
             if filename.lower().endswith(".shp"):
                 infrastructure_tmp_raster = (
-                    os.path.join(tmp_dir, os.path.basename(
-                        filename.lower() + ".tif")))
+                    pygeoprocessing.temporary_filename())
                 pygeoprocessing.geoprocessing.new_raster_from_base_uri(
                     globio_lulc_uri, infrastructure_tmp_raster,
                     'GTiff', -1.0, gdal.GDT_Int32, fill_value=0)
@@ -164,6 +168,10 @@ def execute(args):
         infrastructure_uri, gdal.GDT_Byte, infrastructure_nodata,
         out_pixel_size, "intersection", dataset_to_align_index=0,
         assert_datasets_projected=False, vectorize_op=False)
+
+    # clean up the temporary filenames
+    for filename in infrastructure_filenames:
+        os.remove(filename)
 
     #calc_msa_f
     primary_veg_mask_uri = os.path.join(
@@ -422,11 +430,17 @@ def make_gaussian_kernel_uri(sigma, kernel_uri):
         kernel_band.WriteArray(kernel_row, 0, row_index)
 
 
-def load_msa_parameter_table(msa_parameter_table_filename):
+def load_msa_parameter_table(
+        msa_parameter_table_filename, intensification_fraction):
     """Loads a specifically formatted parameter table into a dictionary that
-        can be used to dymanicaly define the MSA ranges.
+    can be used to dynamically define the MSA ranges.
 
-        msa_parameter_table_filename - (string) path to msa csv table
+    Parameters:
+        msa_parameter_table_filename (string): path to msa csv table
+        intensification_fraction (float): a number between 0 and 1 indicating
+            what level between msa_lu 8 and 9 to define the general GLOBIO
+            code "12" to.
+
 
         returns a dictionary of the form
             {
@@ -449,8 +463,11 @@ def load_msa_parameter_table(msa_parameter_table_filename):
                     valuea: msa_lu_value, ...
                     valueb: ...
                     '<': (bound, msa_lu_value),
-                    '>': (bound, msa_lu_value)}
-            }"""
+                    '>': (bound, msa_lu_value)
+                    12: (msa_lu_8 * intensification_fraction +
+                         msa_lu_9 * (1.0 - intensification_fraction)}
+            }
+    """
 
     with open(msa_parameter_table_filename, 'rb') as msa_parameter_table_file:
         reader = csv.DictReader(msa_parameter_table_file)
@@ -468,6 +485,9 @@ def load_msa_parameter_table(msa_parameter_table_filename):
                 value = float(line['Value'])
             msa_dict[line['MSA_type']][value] = float(line['MSA_x'])
     # cast back to a regular dict so we get keyerrors on non-existant keys
+    msa_dict['msa_lu'][12] = (
+        msa_dict['msa_lu'][8] * intensification_fraction +
+        msa_dict['msa_lu'][9] * (1.0 - intensification_fraction))
     return dict(msa_dict)
 
 
@@ -504,7 +524,6 @@ def _calculate_globio_lulc_map(
     globio_lulc_uri = os.path.join(
         intermediate_dir, 'globio_lulc%s.tif' % file_suffix)
 
-    intensification_uri = args['intensification_uri']
     potential_vegetation_uri = args['potential_vegetation_uri']
     pasture_uri = args['pasture_uri']
 
@@ -556,23 +575,21 @@ def _calculate_globio_lulc_map(
     #remap globio lulc to an internal lulc based on ag and intensification
     #proportion these came from the 'expansion_scenarios.py'
     pasture_threshold = float(args['pasture_threshold'])
-    intensification_threshold = float(args['intensification_threshold'])
     primary_threshold = float(args['primary_threshold'])
 
     def _create_globio_lulc(
-            lulc_array, intensification, potential_vegetation_array, pasture_array,
+            lulc_array, potential_vegetation_array, pasture_array,
             ffqi):
         """vectorize_dataset op to construct the globio lulc given relevant
             biophysical parameters."""
 
-        #Step 1.2b: Assign high/low according to threshold based on yieldgap.
+        # Step 1.2b: Assign high/low according to threshold based on yieldgap.
         nodata_mask = lulc_array == globio_nodata
-        high_low_intensity_agriculture = numpy.where(
-            intensification < intensification_threshold, 9.0, 8.0)
 
-        #Step 1.2c: Stamp ag_split classes onto input LULC
+        # Step 1.2c: Classify all ag classes as a new LULC value "12" per our
+        # custom design of agriculture
         lulc_ag_split = numpy.where(
-            lulc_array == 132.0, high_low_intensity_agriculture, lulc_array)
+            lulc_array == 132.0, 12, lulc_array)
         nodata_mask = nodata_mask | (lulc_array == globio_nodata)
 
         #Step 1.3a: Split Scrublands and grasslands into pristine
@@ -600,16 +617,16 @@ def _calculate_globio_lulc_map(
         #Step 1.4b: Stamp ag_split classes onto input LULC
         globio_lulc = numpy.where(
             broad_lulc_shrub_split == 130, four_types_of_forest,
-            broad_lulc_shrub_split) #stamp primary vegetation
+            broad_lulc_shrub_split)  # stamp primary vegetation
 
         return numpy.where(nodata_mask, globio_nodata, globio_lulc)
 
     LOGGER.info('create the globio lulc')
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        [intermediate_globio_lulc_uri, intensification_uri,
-         potential_vegetation_uri, pasture_uri, ffqi_uri],
-        _create_globio_lulc, globio_lulc_uri, gdal.GDT_Int32, globio_nodata,
-        out_pixel_size, "intersection", dataset_to_align_index=0,
-        assert_datasets_projected=False, vectorize_op=False)
+        [intermediate_globio_lulc_uri, potential_vegetation_uri, pasture_uri,
+         ffqi_uri], _create_globio_lulc, globio_lulc_uri, gdal.GDT_Int32,
+        globio_nodata, out_pixel_size, "intersection",
+        dataset_to_align_index=0, assert_datasets_projected=False,
+        vectorize_op=False)
 
     return globio_lulc_uri
