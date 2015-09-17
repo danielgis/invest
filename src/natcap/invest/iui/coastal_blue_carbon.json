@@ -1,0 +1,211 @@
+{
+  "id": "window",
+  "label": "Coastal Blue Carbon",
+  "targetScript": "natcap.invest.coastal_blue_carbon.coastal_blue_carbon",
+  "modelName": "coastal_blue_carbon",
+  "localDocURI": "../documentation/coastal_blue_carbon.html",
+  "height": 800,
+  "width": 700,
+  "elements": [
+    {
+      "id": "workspace_list",
+      "type": "list",
+      "elements": [
+        {
+          "id": "workspace_dir",
+          "args_id": "workspace_dir",
+          "type": "folder",
+          "label": "Workspace",
+          "defaultValue": "../CoastalBlueCarbon/",
+          "helpText": "The selected folder is used as the workspace where all intermediate and output files will be written.<br><br>If the selected folder does not exist, it will be created.<br><br><b>If datasets already exist in the selected folder, they will be overwritten.</b><p>For more information, see 'Data Needs' section in the model's documentation",
+          "required": true
+        },
+        {
+          "id": "results_suffix",
+          "args_id": "results_suffix",
+          "type": "text",
+          "dataType": "string",
+          "label": "Results Suffix (Optional)",
+          "defaultValue": "",
+          "required": false,
+          "helpText": "(help text)"
+        },
+        {
+          "id": "lulc_lookup_uri",
+          "args_id": "lulc_lookup_uri",
+          "type": "file",
+          "label": "LULC Lookup Table (CSV)",
+          "defaultValue": "../CoastalBlueCarbon/inputs/lulc_lookup.csv",
+          "helpText": "see 'Data Needs' section in the model's documentation",
+          "required": true
+        },
+        {
+          "id": "lulc_transition_uri",
+          "args_id": "lulc_transition_uri",
+          "type": "file",
+          "label": "LULC Transition Effect of Carbon Table (CSV)",
+          "defaultValue": "../CoastalBlueCarbon/outputs_preprocessor/transitions_sample.csv",
+          "helpText": "see 'Data Needs' section in the model's documentation",
+          "required": true
+        },
+        {
+          "id": "carbon_pool_initial_uri",
+          "args_id": "carbon_pool_initial_uri",
+          "type": "file",
+          "label": "Carbon Pool Initial Variables Table (CSV)",
+          "defaultValue": "../CoastalBlueCarbon/outputs_preprocessor/carbon_pool_initial_sample.csv",
+          "helpText": "see 'Data Needs' section in the model's documentation",
+          "required": true
+        },
+        {
+          "id": "carbon_pool_transient_uri",
+          "args_id": "carbon_pool_transient_uri",
+          "type": "file",
+          "label": "Carbon Pool Transient Variables File (CSV)",
+          "defaultValue": "../CoastalBlueCarbon/outputs_preprocessor/carbon_pool_transient_sample.csv",
+          "helpText": "",
+          "required": true
+       },
+       {
+         "id": "analysis_year",
+         "args_id": "analysis_year",
+         "type": "text",
+         "label": "Analysis End Year",
+         "validateAs": {
+           "type": "number"
+         },
+         "validText": "[1-9][0-9]*",
+         "dataType": "int",
+         "defaultValue": "2150",
+         "helpText": "",
+         "required": false
+       }
+      ]
+    },
+    {
+      "id": "lulc_snapshot_list",
+      "type": "multi",
+      "args_id": "lulc_snapshot_list",
+      "label": "Land Use/Land Cover Rasters (GDAL-supported)",
+      "sampleElement": {
+        "id": "sample_id",
+        "type": "file",
+        "label": "Input",
+        "validateAs": {
+          "type": "GDAL"
+        }
+      },
+      "defaultValue": [
+        "../CoastalBlueCarbon/inputs/GBJC_2004_mean_Resample.tif",
+        "../CoastalBlueCarbon/inputs/GBJC_2050_mean_Resample.tif",
+        "../CoastalBlueCarbon/inputs/GBJC_2100_mean_Resample.tif"
+      ],
+      "linkText": "Add Another",
+      "helpText": "LULC snapshot maps must be entered in chronological order."
+    },
+    {
+      "id": "lulc_snapshot_years_list",
+      "type": "multi",
+      "args_id": "lulc_snapshot_years_list",
+      "label": "Land Use/Land Cover Years",
+      "sampleElement": {
+        "id": "sample_id",
+        "type": "text",
+        "label": "Input",
+        "validateAs": {
+          "type": "number",
+          "allowedValues": {
+             "pattern": "^[0-9]+"
+          }
+        }
+      },
+      "defaultValue": [
+        "2004",
+        "2050",
+        "2100"
+      ],
+      "linkText": "Add Another",
+      "helpText": "LULC snapshot years must be entered in chronological order."
+    },
+    {
+      "id": "do_economic_analysis",
+      "args_id": "do_economic_analysis",
+      "label": "Calculate Net Present Value of Sequestered Carbon",
+      "type": "container",
+      "defaultValue": true,
+      "required": true,
+      "collapsible": true,
+      "elements": [
+        {
+          "id": "economics_list",
+          "type": "list",
+          "elements": [
+            {
+              "id": "do_price_table",
+              "args_id": "do_price_table",
+              "type": "checkbox",
+              "label": "Use Price Table",
+              "required": true,
+              "defaultValue": false,
+              "helpText": ""
+            },
+            {
+              "id": "price",
+              "args_id": "price",
+              "disabledBy": "do_price_table",
+              "type": "text",
+              "label": "Price",
+              "defaultValue": "10.0",
+              "required": true,
+              "validateAs": {
+                "type": "number"
+              },
+              "dataType": "float",
+              "helpText": ""
+            },
+            {
+              "id": "interest_rate",
+              "args_id": "interest_rate",
+              "disabledBy": "do_price_table",
+              "type": "text",
+              "label": "Interest Rate (%)",
+              "defaultValue": "3.0",
+              "required": true,
+              "validateAs": {
+                "type": "number"
+              },
+              "dataType": "float",
+              "helpText": ""
+            },
+            {
+              "id": "price_table_uri",
+              "args_id": "price_table_uri",
+              "enabledBy": "do_price_table",
+              "type": "file",
+              "label": "Price Table (CSV)",
+              "defaultValue": "../CoastalBlueCarbon/inputs/price_table.csv",
+              "required": true,
+              "validateAs": {
+                "type": "CSV"
+              },
+              "helpText": "A CSV table containing information related to the earnings a producer receives for selling a given crop and the expenses involved with producing that crop.<br><br>Please consult the User Guide to learn more about how the table should be formatted."
+            },
+            {
+              "id": "discount_rate",
+              "args_id": "discount_rate",
+              "type": "text",
+              "label": "Discount Rate (%)",
+              "defaultValue": "6.0",
+              "required": true,
+              "validateAs": {
+                "type": "number"
+              },
+              "dataType": "float",
+              "helpText": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
