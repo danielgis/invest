@@ -7,8 +7,13 @@ import logging
 import sqlite3
 import zipfile
 import glob
+import hashlib
+import pprint
 
+from osgeo import gdal
+from osgeo import ogr
 import Pyro4
+import pygeoprocessing
 
 import natcap.invest.utils
 
@@ -36,13 +41,15 @@ class DataServer(object):
         'watersheds',
     ]
 
-    _DATA_SERVER_SCHEMA = {
-        'data_available_table': [
-            'data_type',
-            'bounding_box',
-            'path',
-        ]
-    }
+    _DATA_TABLE_NAME = 'data_available_table'
+
+    _DATA_SERVER_SCHEMA = [
+        ('gis_type', ' text'),
+        ('data_type', ' text'),
+        ('bounding_box', ' text'),
+        ('path', ' text'),
+        ('path_hash', ' text PRIMARY KEY'),
+    ]
 
     def __init__(self, database_filepath, search_directory_list):
         """build a server w/ files in that directory"""
@@ -54,17 +61,20 @@ class DataServer(object):
 
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
-        for table_name, table_fields in self._DATA_SERVER_SCHEMA.iteritems():
-            db_cursor.execute(
-                'CREATE TABLE IF NOT EXISTS %s (%s)' % (
-                    table_name, ','.join(
-                        ['%s text' % field_id for field_id in table_fields])))
+        db_cursor.execute(
+            'CREATE TABLE IF NOT EXISTS %s (%s)' % (
+                self._DATA_TABLE_NAME, ','.join(
+                    ['%s %s' % (field_id, modifier) for
+                     field_id, modifier in self._DATA_SERVER_SCHEMA])))
         db_connection.commit()
         db_connection.close()
 
         raster_paths = []
         vector_paths = []
+
         for root, dirs, files in os.walk(search_directory_list):
+            if any(x in root for x in ['.svn']):
+                continue
             # check if any dirs are GIS types and prune if so
             for dir_index in reversed(xrange(len(dirs))):
                 dir_path = os.path.join(root, dirs[dir_index])
@@ -74,16 +84,76 @@ class DataServer(object):
                     vector_paths.append(dir_path)
                 else:
                     continue
+                # if we get here, the directory is either a raster or vector
+                # so no need to pick up subdirs
                 del dirs[dir_index]
             for filename in files:
                 file_path = os.path.join(root, filename)
+                if any(file_path.endswith(suffix) for suffix in [
+                        '.xml', '.hdr', '.tfw', '.gfs', '.lyr', '.xls',
+                        '.pdf', '.txt']):
+                    continue
                 if natcap.invest.utils.is_gdal_type(file_path):
                     raster_paths.append(file_path)
                 elif natcap.invest.utils.is_ogr_type(file_path):
                     vector_paths.append(file_path)
 
-        LOGGER.debug(raster_paths)
-        LOGGER.debug(vector_paths)
+        data_hash = {}
+        for gis_type, paths in [
+                ('raster', raster_paths), ('vector', vector_paths)]:
+            for path in paths:
+                try:
+                    if gis_type == 'raster':
+                        bounding_box = pygeoprocessing.get_bounding_box(path)
+                    elif gis_type == 'vector':
+                        bounding_box = (
+                            pygeoprocessing.get_datasource_bounding_box(path))
+                    else:
+                        raise ValueError("Unknown gis_type: %s", gis_type)
+                except AttributeError:
+                    LOGGER.error("Can't calculate bounds of %s", path)
+
+                if bounding_box is None:
+                    continue
+
+                # parse out the underscored prefix of the base directory name
+                # by convention, we name this to be the GIS data type
+                if os.path.isfile(path):
+                    data_type = (
+                        os.path.basename(os.path.dirname(path)).split('_')[0])
+                elif os.path.isdir(path):
+                    data_type = (
+                        os.path.basename(path).split('_')[0])
+                else:
+                    raise ValueError("What the hell is this %s" % path)
+
+                path_hash = hashlib.sha1(path).hexdigest()
+                data_hash[path_hash] = {
+                    'path': path,
+                    'gis_type': gis_type,
+                    'bounding_box': bounding_box,
+                    'data_type': data_type,
+                }
+
+        #LOGGER.debug(pprint.pformat(data_hash))
+
+        db_connection = sqlite3.connect(self.database_filepath)
+        db_cursor = db_connection.cursor()
+
+        for path_hash, data_table in data_hash.iteritems():
+            position_format = ','.join(['?'] * (len(data_table)+1))
+            field_names = data_table.keys()
+            field_names += ['path_hash']
+            data_table['path_hash'] = path_hash
+
+            insert_command = (
+                'INSERT OR REPLACE INTO %s ' % self._DATA_TABLE_NAME +
+                '(%s) VALUES (%s)' % (','.join(field_names), position_format))
+            ordered_table_data = [
+                str(data_table[field_id]) for field_id in field_names]
+            db_cursor.execute(insert_command, ordered_table_data)
+        db_connection.commit()
+        db_connection.close()
 
 
     @staticmethod
