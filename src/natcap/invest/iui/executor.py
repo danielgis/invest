@@ -700,7 +700,7 @@ def _log_model(model_name, model_args, session_id=None):
 
     try:
         bounding_box_intersection, bounding_box_union = (
-            natcap.invest.utils._calculate_args_bounding_box(model_args))
+            natcap.invest.utils.calculate_args_bounding_box(model_args))
 
         payload = {
             'model_name': model_name,
