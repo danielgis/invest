@@ -24,14 +24,9 @@ import tempfile
 from types import StringType
 import importlib
 
-from osgeo import gdal
-from osgeo import ogr
-from osgeo import osr
-import pygeoprocessing
 import natcap.invest
 import natcap.invest.iui
 from natcap.invest import fileio as fileio
-import pygeoprocessing.geoprocessing
 
 LOGGER = natcap.invest.iui.get_ui_logger(None)
 ENCODING = sys.getfilesystemencoding()
