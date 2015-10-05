@@ -26,6 +26,14 @@ class DataServer(object):
 
     _STATIC_DATA_TYPES = [
         'dem',
+        'erodibility',
+        'erosivity',
+        'lulc',
+        'pawc',
+        'precipitation',
+        'rootdepth',
+        'streams',
+        'watersheds',
     ]
 
     def __init__(self, search_directory_list):
