@@ -9,7 +9,7 @@ from osgeo import osr
 import pygeoprocessing
 
 
-def _calculate_args_bounding_box(args_dict):
+def calculate_args_bounding_box(args_dict):
     """Parse through an InVEST style args dict and calculate the bounding boxes
     of any paths that can be interpreted as GIS types.
 
