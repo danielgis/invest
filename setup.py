@@ -122,6 +122,7 @@ setup(
         'natcap.invest.blue_carbon',
         'natcap.invest.carbon',
         'natcap.invest.coastal_vulnerability',
+        'natcap.invest.data_platform',
         'natcap.invest.dbfpy',
         'natcap.invest.finfish_aquaculture',
         'natcap.invest.fisheries',

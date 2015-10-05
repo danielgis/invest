@@ -10,7 +10,7 @@ import glob
 
 import Pyro4
 
-import natcap.invest
+import natcap.invest.utils
 
 logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
@@ -36,10 +36,55 @@ class DataServer(object):
         'watersheds',
     ]
 
-    def __init__(self, search_directory_list):
-        """build a server w/ files in that directory
-        """
-        pass
+    _DATA_SERVER_SCHEMA = {
+        'data_available_table': [
+            'data_type',
+            'bounding_box',
+            'path',
+        ]
+    }
+
+    def __init__(self, database_filepath, search_directory_list):
+        """build a server w/ files in that directory"""
+
+        self.database_filepath = database_filepath
+        filepath_directory = os.path.dirname(self.database_filepath)
+        if filepath_directory != '' and not os.path.exists(filepath_directory):
+            os.mkdir(os.path.dirname(self.database_filepath))
+
+        db_connection = sqlite3.connect(self.database_filepath)
+        db_cursor = db_connection.cursor()
+        for table_name, table_fields in self._DATA_SERVER_SCHEMA.iteritems():
+            db_cursor.execute(
+                'CREATE TABLE IF NOT EXISTS %s (%s)' % (
+                    table_name, ','.join(
+                        ['%s text' % field_id for field_id in table_fields])))
+        db_connection.commit()
+        db_connection.close()
+
+        raster_paths = []
+        vector_paths = []
+        for root, dirs, files in os.walk(search_directory_list):
+            # check if any dirs are GIS types and prune if so
+            for dir_index in reversed(xrange(len(dirs))):
+                dir_path = os.path.join(root, dirs[dir_index])
+                if natcap.invest.utils.is_gdal_type(dir_path):
+                    raster_paths.append(dir_path)
+                elif natcap.invest.utils.is_ogr_type(dir_path):
+                    vector_paths.append(dir_path)
+                else:
+                    continue
+                del dirs[dir_index]
+            for filename in files:
+                file_path = os.path.join(root, filename)
+                if natcap.invest.utils.is_gdal_type(file_path):
+                    raster_paths.append(file_path)
+                elif natcap.invest.utils.is_ogr_type(file_path):
+                    vector_paths.append(file_path)
+
+        LOGGER.debug(raster_paths)
+        LOGGER.debug(vector_paths)
+
 
     @staticmethod
     def get_server_version():

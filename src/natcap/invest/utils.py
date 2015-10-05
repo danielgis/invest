@@ -9,6 +9,26 @@ from osgeo import osr
 import pygeoprocessing
 
 
+def is_gdal_type(arg):
+    """tests if input argument is a path to a gdal raster"""
+    if (isinstance(arg, str) or
+            isinstance(arg, unicode)) and os.path.exists(arg):
+        raster = gdal.Open(arg)
+        if raster is not None:
+            return True
+    return False
+
+
+def is_ogr_type(arg):
+    """tests if input argument is a path to an ogr vector"""
+    if (isinstance(arg, str) or
+            isinstance(arg, unicode)) and os.path.exists(arg):
+        vector = ogr.Open(arg)
+        if vector is not None:
+            return True
+    return False
+
+
 def calculate_args_bounding_box(args_dict):
     """Parse through an InVEST style args dict and calculate the bounding boxes
     of any paths that can be interpreted as GIS types.
@@ -72,24 +92,6 @@ def calculate_args_bounding_box(args_dict):
             inputs.  None, None if no arguments were GIS data types and input
             bounding boxes are None."""
 
-        def _is_gdal(arg):
-            """tests if input argument is a path to a gdal raster"""
-            if (isinstance(arg, str) or
-                    isinstance(arg, unicode)) and os.path.exists(arg):
-                raster = gdal.Open(arg)
-                if raster is not None:
-                    return True
-            return False
-
-        def _is_ogr(arg):
-            """tests if input argument is a path to an ogr vector"""
-            if (isinstance(arg, str) or
-                    isinstance(arg, unicode)) and os.path.exists(arg):
-                vector = ogr.Open(arg)
-                if vector is not None:
-                    return True
-            return False
-
         if isinstance(arg, dict):
             # if dict, grab the bb's for all the members in it
             for value in arg.itervalues():
@@ -105,13 +107,13 @@ def calculate_args_bounding_box(args_dict):
             # this is an undefined bounding box that gets returned when ogr
             # opens a table only
             local_bb = [0., 0., 0., 0.]
-            if _is_gdal(arg):
+            if is_gdal_type(arg):
                 local_bb = pygeoprocessing.get_bounding_box(arg)
                 projection_wkt = pygeoprocessing.get_dataset_projection_wkt_uri(
                     arg)
                 spatial_ref = osr.SpatialReference()
                 spatial_ref.ImportFromWkt(projection_wkt)
-            elif _is_ogr(arg):
+            elif is_ogr_type(arg):
                 local_bb = pygeoprocessing.get_datasource_bounding_box(arg)
                 spatial_ref = pygeoprocessing.get_spatial_ref_uri(arg)
 
