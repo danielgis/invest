@@ -12,6 +12,7 @@ import pprint
 
 from osgeo import gdal
 from osgeo import ogr
+from osgeo import osr
 import Pyro4
 import pygeoprocessing
 
@@ -125,7 +126,9 @@ class DataServer(object):
                     data_type = (
                         os.path.basename(path).split('_')[0])
                 else:
-                    raise ValueError("What the hell is this %s" % path)
+                    raise ValueError(
+                        "This is neither a file nor directory.  WTF is it? "
+                        " %s" % path)
 
                 path_hash = hashlib.sha1(path).hexdigest()
                 data_hash[path_hash] = {
@@ -134,8 +137,6 @@ class DataServer(object):
                     'bounding_box': bounding_box,
                     'data_type': data_type,
                 }
-
-        #LOGGER.debug(pprint.pformat(data_hash))
 
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
@@ -161,21 +162,11 @@ class DataServer(object):
         """Returns a server version string to the client"""
         return natcap.invest.__version__
 
-    def get_data(self, data_id, bounding_box):
+    def get_data_preview(self):
         """get data from bounding box"""
 
-        #TODO: the following is stolen from logging
-        try:
-            from osgeo import ogr
-            from osgeo import osr
-        except ImportError:
-            LOGGER.error("osgeo.ogr and osgeo.osr not installed, aborting")
-            raise
-
         #ZIP and stream the result back
-        workspace_dir = tempfile.mkdtemp()
-        shapefile_filename = os.path.join(
-            workspace_dir, 'model_run_summary.shp')
+        shapefile_filename = 'data_preview.shp'
         driver = ogr.GetDriverByName('ESRI Shapefile')
 
         if os.path.isfile(shapefile_filename):
@@ -186,24 +177,21 @@ class DataServer(object):
         lat_lng_ref.ImportFromEPSG(4326)  # EPSG 4326 is lat/lng
 
         polygon_layer = datasource.CreateLayer(
-            'model_run_summary', lat_lng_ref, ogr.wkbPolygon)
+            'data_preview', lat_lng_ref, ogr.wkbPolygon)
 
-        polygon_layer.CreateField(ogr.FieldDefn('n_runs', ogr.OFTInteger))
-        polygon_layer.CreateField(ogr.FieldDefn('model', ogr.OFTString))
+        polygon_layer.CreateField(ogr.FieldDefn('data_type', ogr.OFTString))
+        polygon_layer.CreateField(ogr.FieldDefn('gis_type', ogr.OFTString))
 
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
         selection_command = (
-            "SELECT model_name, bounding_box_intersection, count(model_name) "
-            "FROM %s " % self._MODEL_LOG_TABLE_NAME +
-            "WHERE bounding_box_intersection not LIKE 'None' "
-            "GROUP BY model_name, bounding_box_intersection;")
+            "SELECT data_type, gis_type, bounding_box "
+            "FROM %s " % self._DATA_TABLE_NAME + ";")
         db_cursor.execute(selection_command)
 
         for line in db_cursor:
             try:
-                model_name, bounding_box_string, n_runs = line
-                n_runs = int(n_runs)
+                data_type, gis_type, bounding_box_string = line
                 bounding_box = list(
                     [float(x) for x in bounding_box_string[1:-1].split(',')])
                 ring = ogr.Geometry(ogr.wkbLinearRing)
@@ -216,24 +204,14 @@ class DataServer(object):
                 poly.AddGeometry(ring)
                 feature = ogr.Feature(polygon_layer.GetLayerDefn())
                 feature.SetGeometry(poly)
-                feature.SetField('n_runs', n_runs)
-                feature.SetField('model', str(model_name))
+                feature.SetField('data_type', str(data_type))
+                feature.SetField('gis_type', str(gis_type))
                 polygon_layer.CreateFeature(feature)
             except Exception as exception:
                 LOGGER.warn(
-                    'unable to create a bounding box for %s (%s)', line,
+                    'unable to do this thing for %s (%s)', line,
                     str(exception))
-
         datasource.SyncToDisk()
-
-        model_run_summary_zip_name = os.path.join(
-            workspace_dir, 'model_run_summary.zip')
-        with zipfile.ZipFile(model_run_summary_zip_name, 'w') as myzip:
-            for filename in glob.glob(
-                    os.path.splitext(shapefile_filename)[0] + '.*'):
-                myzip.write(filename, os.path.basename(filename))
-        model_run_summary_binary = open(model_run_summary_zip_name, 'rb').read()
-        return model_run_summary_binary
 
 
 def launch_data_server(data_directory, hostname, port):
