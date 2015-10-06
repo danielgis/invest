@@ -103,17 +103,10 @@ class DataServer(object):
         for gis_type, paths in [
                 ('raster', raster_paths), ('vector', vector_paths)]:
             for path in paths:
-                try:
-                    if gis_type == 'raster':
-                        bounding_box = pygeoprocessing.get_bounding_box(path)
-                    elif gis_type == 'vector':
-                        bounding_box = (
-                            pygeoprocessing.get_datasource_bounding_box(path))
-                    else:
-                        raise ValueError("Unknown gis_type: %s", gis_type)
-                except AttributeError:
-                    LOGGER.error("Can't calculate bounds of %s", path)
-
+                # packing the path as an args dictionary so
+                # calculate_args_bounding_box can convert to lat/lng
+                bounding_box = natcap.invest.utils.calculate_args_bounding_box(
+                    {'path': path})[0]
                 if bounding_box is None:
                     continue
 
