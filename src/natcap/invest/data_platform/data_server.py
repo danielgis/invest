@@ -73,9 +73,19 @@ class DataServer(object):
         raster_paths = []
         vector_paths = []
 
+        LOGGER.info("scanning directory")
         for root, dirs, files in os.walk(search_directory_list):
             if any(x in root for x in ['.svn']):
                 continue
+            if natcap.invest.utils.is_gdal_type(root):
+                raster_paths.append(root)
+                dirs.clear()
+                continue
+            if natcap.invest.utils.is_ogr_type(root):
+                vector_paths.append(root)
+                dirs.clear()
+                continue
+
             # check if any dirs are GIS types and prune if so
             for dir_index in reversed(xrange(len(dirs))):
                 dir_path = os.path.join(root, dirs[dir_index])
@@ -92,7 +102,7 @@ class DataServer(object):
                 file_path = os.path.join(root, filename)
                 if any(file_path.endswith(suffix) for suffix in [
                         '.xml', '.hdr', '.tfw', '.gfs', '.lyr', '.xls',
-                        '.pdf', '.txt']):
+                        '.pdf', '.txt', '.zip']):
                     continue
                 if natcap.invest.utils.is_gdal_type(file_path):
                     raster_paths.append(file_path)
@@ -100,6 +110,7 @@ class DataServer(object):
                     vector_paths.append(file_path)
 
         data_hash = {}
+        LOGGER.info("calculating bounding boxes")
         for gis_type, paths in [
                 ('raster', raster_paths), ('vector', vector_paths)]:
             for path in paths:
@@ -133,7 +144,7 @@ class DataServer(object):
 
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
-
+        LOGGER.info("populating database")
         for path_hash, data_table in data_hash.iteritems():
             position_format = ','.join(['?'] * (len(data_table)+1))
             field_names = data_table.keys()
@@ -157,85 +168,85 @@ class DataServer(object):
     def get_data_preview(self):
         """get data from bounding box"""
 
-        for data_type in self._STATIC_DATA_TYPES:
-            #ZIP and stream the result back
-            shapefile_filename = data_type + '_coverage_preview.geojson'
-            driver = ogr.GetDriverByName('GeoJSON')
+        #for data_type in self._STATIC_DATA_TYPES:
+        #ZIP and stream the result back
+        shapefile_filename = 'coverage_preview.geojson'
+        driver = ogr.GetDriverByName('GeoJSON')
 
-            if os.path.isfile(shapefile_filename):
-                os.remove(shapefile_filename)
-            datasource = driver.CreateDataSource(shapefile_filename)
+        if os.path.isfile(shapefile_filename):
+            os.remove(shapefile_filename)
+        datasource = driver.CreateDataSource(shapefile_filename)
 
-            lat_lng_projection = osr.SpatialReference()
-            lat_lng_projection.ImportFromEPSG(4326)
-            out_projection = osr.SpatialReference()
-            #out_projection.ImportFromEPSG(4326)  # EPSG 4326 is lat/lng
-            out_projection.ImportFromEPSG(3857)  # EPSG 4326 is lat/lng
-            transform = osr.CoordinateTransformation(lat_lng_projection, out_projection)
-            polygon_layer = datasource.CreateLayer(
-                data_type, out_projection, ogr.wkbPolygon)
+        lat_lng_projection = osr.SpatialReference()
+        lat_lng_projection.ImportFromEPSG(4326)
+        out_projection = osr.SpatialReference()
+        #out_projection.ImportFromEPSG(4326)  # EPSG 4326 is lat/lng
+        out_projection.ImportFromEPSG(3857)  # EPSG 4326 is lat/lng
+        transform = osr.CoordinateTransformation(lat_lng_projection, out_projection)
+        polygon_layer = datasource.CreateLayer(
+            'coverage_preview', out_projection, ogr.wkbPolygon)
 
-            polygon_layer.CreateField(
-                ogr.FieldDefn('data_type', ogr.OFTString))
-            polygon_layer.CreateField(
-                ogr.FieldDefn('gis_type', ogr.OFTString))
-            polygon_layer.CreateField(
-                ogr.FieldDefn('path', ogr.OFTString))
+        polygon_layer.CreateField(
+            ogr.FieldDefn('data_type', ogr.OFTString))
+        polygon_layer.CreateField(
+            ogr.FieldDefn('gis_type', ogr.OFTString))
+        polygon_layer.CreateField(
+            ogr.FieldDefn('path', ogr.OFTString))
 
-            db_connection = sqlite3.connect(self.database_filepath)
-            db_cursor = db_connection.cursor()
-            selection_command = (
-                "SELECT data_type, gis_type, bounding_box, path "
-                "FROM %s " % self._DATA_TABLE_NAME +
-                " WHERE data_type = '%s';" % data_type)
-            LOGGER.debug(selection_command)
-            db_cursor.execute(selection_command)
+        db_connection = sqlite3.connect(self.database_filepath)
+        db_cursor = db_connection.cursor()
+        selection_command = (
+            "SELECT data_type, gis_type, bounding_box, path "
+            "FROM %s " % self._DATA_TABLE_NAME + ";")
+            #" WHERE data_type = '%s';" % data_type)
+        LOGGER.debug(selection_command)
+        db_cursor.execute(selection_command)
 
-            for line in db_cursor:
-                try:
-                    data_type, gis_type, bounding_box_string, path = line
-                    bounding_box = list(
-                        [float(x) for x in bounding_box_string[1:-1].split(',')])
-                    ring = ogr.Geometry(ogr.wkbLinearRing)
+        for line in db_cursor:
+            try:
+                data_type, gis_type, bounding_box_string, path = line
+                bounding_box = list(
+                    [float(x) for x in bounding_box_string[1:-1].split(',')])
+                ring = ogr.Geometry(ogr.wkbLinearRing)
 
-                    point_min = ogr.CreateGeometryFromWkt(
-                        "POINT (%f %f)" % (bounding_box[0], bounding_box[1]))
+                point_min = ogr.CreateGeometryFromWkt(
+                    "POINT (%f %f)" % (bounding_box[0], bounding_box[1]))
 
-                    point_max = ogr.CreateGeometryFromWkt(
-                        "POINT (%f %f)" % (bounding_box[2], bounding_box[3]))
+                point_max = ogr.CreateGeometryFromWkt(
+                    "POINT (%f %f)" % (bounding_box[2], bounding_box[3]))
 
-                    point_min.Transform(transform)
-                    point_max.Transform(transform)
+                point_min.Transform(transform)
+                point_max.Transform(transform)
 
-                    x_min = point_min.GetX()
-                    y_min = point_min.GetY()
-                    x_max = point_max.GetX()
-                    y_max = point_max.GetY()
+                x_min = point_min.GetX()
+                y_min = point_min.GetY()
+                x_max = point_max.GetX()
+                y_max = point_max.GetY()
 
-                    # check for wraparound
-                    if x_max < x_min:
-                        x_max *= -1
+                # check for wraparound
+                if x_max < x_min:
+                    x_max *= -1
 
-                    ring.AddPoint(x_min, y_max)
-                    ring.AddPoint(x_min, y_min)
-                    ring.AddPoint(x_max, y_min)
-                    ring.AddPoint(x_max, y_max)
-                    ring.AddPoint(x_min, y_max)
+                ring.AddPoint(x_min, y_max)
+                ring.AddPoint(x_min, y_min)
+                ring.AddPoint(x_max, y_min)
+                ring.AddPoint(x_max, y_max)
+                ring.AddPoint(x_min, y_max)
 
-                    poly = ogr.Geometry(ogr.wkbPolygon)
-                    poly.AddGeometry(ring)
-                    poly.Transform(transform)
-                    feature = ogr.Feature(polygon_layer.GetLayerDefn())
-                    feature.SetGeometry(poly)
-                    feature.SetField('data_type', str(data_type))
-                    feature.SetField('gis_type', str(gis_type))
-                    feature.SetField('path', str(path))
-                    polygon_layer.CreateFeature(feature)
-                except Exception as exception:
-                    LOGGER.warn(
-                        'unable to do this thing for %s (%s)', line,
-                        str(exception))
-            datasource.SyncToDisk()
+                poly = ogr.Geometry(ogr.wkbPolygon)
+                poly.AddGeometry(ring)
+                poly.Transform(transform)
+                feature = ogr.Feature(polygon_layer.GetLayerDefn())
+                feature.SetGeometry(poly)
+                feature.SetField('data_type', str(data_type))
+                feature.SetField('gis_type', str(gis_type))
+                feature.SetField('path', str(path))
+                polygon_layer.CreateFeature(feature)
+            except Exception as exception:
+                LOGGER.warn(
+                    'unable to do this thing for %s (%s)', line,
+                    str(exception))
+        datasource.SyncToDisk()
         webpage_out = open('overview.html', 'w')
         webpage_out.write("""<!DOCTYPE html>
 <meta charset="utf-8">
