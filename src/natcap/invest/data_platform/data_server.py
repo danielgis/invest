@@ -179,11 +179,13 @@ class DataServer(object):
                 ogr.FieldDefn('data_type', ogr.OFTString))
             polygon_layer.CreateField(
                 ogr.FieldDefn('gis_type', ogr.OFTString))
+            polygon_layer.CreateField(
+                ogr.FieldDefn('path', ogr.OFTString))
 
             db_connection = sqlite3.connect(self.database_filepath)
             db_cursor = db_connection.cursor()
             selection_command = (
-                "SELECT data_type, gis_type, bounding_box "
+                "SELECT data_type, gis_type, bounding_box, path "
                 "FROM %s " % self._DATA_TABLE_NAME +
                 " WHERE data_type = '%s';" % data_type)
             LOGGER.debug(selection_command)
@@ -191,7 +193,7 @@ class DataServer(object):
 
             for line in db_cursor:
                 try:
-                    data_type, gis_type, bounding_box_string = line
+                    data_type, gis_type, bounding_box_string, path = line
                     bounding_box = list(
                         [float(x) for x in bounding_box_string[1:-1].split(',')])
                     ring = ogr.Geometry(ogr.wkbLinearRing)
@@ -227,6 +229,7 @@ class DataServer(object):
                     feature.SetGeometry(poly)
                     feature.SetField('data_type', str(data_type))
                     feature.SetField('gis_type', str(gis_type))
+                    feature.SetField('path', str(path))
                     polygon_layer.CreateFeature(feature)
                 except Exception as exception:
                     LOGGER.warn(
