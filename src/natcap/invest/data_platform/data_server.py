@@ -149,7 +149,6 @@ class DataServer(object):
         db_connection.commit()
         db_connection.close()
 
-
     @staticmethod
     def get_server_version():
         """Returns a server version string to the client"""
@@ -158,53 +157,98 @@ class DataServer(object):
     def get_data_preview(self):
         """get data from bounding box"""
 
-        #ZIP and stream the result back
-        shapefile_filename = 'data_preview.shp'
-        driver = ogr.GetDriverByName('ESRI Shapefile')
+        for data_type in self._STATIC_DATA_TYPES:
+            #ZIP and stream the result back
+            shapefile_filename = data_type + '_coverage_preview.geojson'
+            driver = ogr.GetDriverByName('GeoJSON')
 
-        if os.path.isfile(shapefile_filename):
-            os.remove(shapefile_filename)
-        datasource = driver.CreateDataSource(shapefile_filename)
+            if os.path.isfile(shapefile_filename):
+                os.remove(shapefile_filename)
+            datasource = driver.CreateDataSource(shapefile_filename)
 
-        lat_lng_ref = osr.SpatialReference()
-        lat_lng_ref.ImportFromEPSG(4326)  # EPSG 4326 is lat/lng
+            lat_lng_projection = osr.SpatialReference()
+            lat_lng_projection.ImportFromEPSG(4326)
+            out_projection = osr.SpatialReference()
+            #out_projection.ImportFromEPSG(4326)  # EPSG 4326 is lat/lng
+            out_projection.ImportFromEPSG(3857)  # EPSG 4326 is lat/lng
+            transform = osr.CoordinateTransformation(lat_lng_projection, out_projection)
+            polygon_layer = datasource.CreateLayer(
+                data_type, out_projection, ogr.wkbPolygon)
 
-        polygon_layer = datasource.CreateLayer(
-            'data_preview', lat_lng_ref, ogr.wkbPolygon)
+            polygon_layer.CreateField(
+                ogr.FieldDefn('data_type', ogr.OFTString))
+            polygon_layer.CreateField(
+                ogr.FieldDefn('gis_type', ogr.OFTString))
 
-        polygon_layer.CreateField(ogr.FieldDefn('data_type', ogr.OFTString))
-        polygon_layer.CreateField(ogr.FieldDefn('gis_type', ogr.OFTString))
+            db_connection = sqlite3.connect(self.database_filepath)
+            db_cursor = db_connection.cursor()
+            selection_command = (
+                "SELECT data_type, gis_type, bounding_box "
+                "FROM %s " % self._DATA_TABLE_NAME +
+                " WHERE data_type = '%s';" % data_type)
+            LOGGER.debug(selection_command)
+            db_cursor.execute(selection_command)
 
-        db_connection = sqlite3.connect(self.database_filepath)
-        db_cursor = db_connection.cursor()
-        selection_command = (
-            "SELECT data_type, gis_type, bounding_box "
-            "FROM %s " % self._DATA_TABLE_NAME + ";")
-        db_cursor.execute(selection_command)
+            for line in db_cursor:
+                try:
+                    data_type, gis_type, bounding_box_string = line
+                    bounding_box = list(
+                        [float(x) for x in bounding_box_string[1:-1].split(',')])
+                    ring = ogr.Geometry(ogr.wkbLinearRing)
 
-        for line in db_cursor:
-            try:
-                data_type, gis_type, bounding_box_string = line
-                bounding_box = list(
-                    [float(x) for x in bounding_box_string[1:-1].split(',')])
-                ring = ogr.Geometry(ogr.wkbLinearRing)
-                ring.AddPoint(bounding_box[0], bounding_box[3])
-                ring.AddPoint(bounding_box[0], bounding_box[1])
-                ring.AddPoint(bounding_box[2], bounding_box[1])
-                ring.AddPoint(bounding_box[2], bounding_box[3])
-                ring.AddPoint(bounding_box[0], bounding_box[3])
-                poly = ogr.Geometry(ogr.wkbPolygon)
-                poly.AddGeometry(ring)
-                feature = ogr.Feature(polygon_layer.GetLayerDefn())
-                feature.SetGeometry(poly)
-                feature.SetField('data_type', str(data_type))
-                feature.SetField('gis_type', str(gis_type))
-                polygon_layer.CreateFeature(feature)
-            except Exception as exception:
-                LOGGER.warn(
-                    'unable to do this thing for %s (%s)', line,
-                    str(exception))
-        datasource.SyncToDisk()
+                    point_min = ogr.CreateGeometryFromWkt(
+                        "POINT (%f %f)" % (bounding_box[0], bounding_box[1]))
+
+                    point_max = ogr.CreateGeometryFromWkt(
+                        "POINT (%f %f)" % (bounding_box[2], bounding_box[3]))
+
+                    point_min.Transform(transform)
+                    point_max.Transform(transform)
+
+                    x_min = point_min.GetX()
+                    y_min = point_min.GetY()
+                    x_max = point_max.GetX()
+                    y_max = point_max.GetY()
+
+                    # check for wraparound
+                    if x_max < x_min:
+                        x_max *= -1
+
+                    ring.AddPoint(x_min, y_max)
+                    ring.AddPoint(x_min, y_min)
+                    ring.AddPoint(x_max, y_min)
+                    ring.AddPoint(x_max, y_max)
+                    ring.AddPoint(x_min, y_max)
+
+                    poly = ogr.Geometry(ogr.wkbPolygon)
+                    poly.AddGeometry(ring)
+                    poly.Transform(transform)
+                    feature = ogr.Feature(polygon_layer.GetLayerDefn())
+                    feature.SetGeometry(poly)
+                    feature.SetField('data_type', str(data_type))
+                    feature.SetField('gis_type', str(gis_type))
+                    polygon_layer.CreateFeature(feature)
+                except Exception as exception:
+                    LOGGER.warn(
+                        'unable to do this thing for %s (%s)', line,
+                        str(exception))
+            datasource.SyncToDisk()
+        webpage_out = open('overview.html', 'w')
+        webpage_out.write("""<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+/* CSS goes here. */
+
+</style>
+<body>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script>
+
+/* JavaScript goes here. */
+
+</script>""")
 
 
 def launch_data_server(data_directory, hostname, port):
