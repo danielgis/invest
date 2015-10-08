@@ -249,20 +249,211 @@ class DataServer(object):
         datasource.SyncToDisk()
         webpage_out = open('overview.html', 'w')
         webpage_out.write("""<!DOCTYPE html>
-<meta charset="utf-8">
+<html>
+<head>
 <style>
 
-/* CSS goes here. */
+.h1, h1 {
+    font-size: 36px;
+}
 
+.h3, h3 {
+    font-size: 24px;
+}
+
+.h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6 {
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: inherit;
+}
+
+body {
+    font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;
+    font-size: 14px;
+    line-height: 1.42857143;
+    color: #333;
+    background-color: #fff;
+}
+
+div {
+    display: block;
+}
+
+.map {
+    height: 500px;
+    width: 100%;
+    margin-bottom: 10px;
+}
+.topRight {
+    position: absolute;
+    top: 0px;
+    right: 0px;
+    width:80px; /* you can use % */
+    height: auto;
+    margin: 5px;
+}
+
+td.datatype {
+    font-weight: bold;
+}
+
+td.path {
+  font-family: monospace;
+}
+
+table {
+  border-spacing: 5px;
+}
+
+.alert-success {
+    color: #3c763d;
+    background-color: #dff0d8;
+    border-color: #d6e9c6;
+        padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
 </style>
+
+<title>Vector layer example</title>
+<script src="https://code.jquery.com/jquery-1.11.2.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+<script src="http://openlayers.org/en/v3.4.0/build/ol.js"></script>
+
+</head>
 <body>
-<script src="http://d3js.org/d3.v3.min.js"></script>
-<script src="http://d3js.org/topojson.v1.min.js"></script>
+
+  <h1>GDAP Data Coverage Overview</h1>
+  <div class="row">
+      <div class="map" id="map"></div>
+  </div>
+  <h3>Highlighted Layer Data:</h3>
+  <div class="span4 offset4">
+    <div id="info" class="alert alert-success">
+      &nbsp;
+    </div>
+  </div>
+
+  <img class="topRight" src="http://www.naturalcapitalproject.org/images/NatCap-Logo.jpg"/>
+
+</div>
 <script>
+  // Vector layer from GeoJSON source
+  var vectorLayer = new ol.layer.Vector({
+      source: new ol.source.GeoJSON({
+          url: 'coverage_preview.geojson',
+          projection: 'EPSG:3857'
+      }),
+      style: new ol.style.Style({
+        stroke: new ol.style.Stroke({
+          color: 'blue',
+          width: 0.1,
+          lineDash: [3,3]
+        }),
+        fill: new ol.style.Fill({
+          color: 'rgba(0, 0, 255, 0.1)'
+        })
+      })
+  });
 
-/* JavaScript goes here. */
+  // OSM tile layer
+  var map = new ol.Map({
+    layers: [
+      new ol.layer.Tile({
+        source: new ol.source.MapQuest({layer: 'osm'})
+      }),
+      vectorLayer
+    ],
+    target: 'map',
+    view: new ol.View({
+      center: [0, 0],
+      zoom: 2.5
+    })
+  });
 
-</script>""")
+  var highlightStyleCache = {};
+  var featureOverlay = new ol.FeatureOverlay({
+    map: map,
+    style: function(feature, resolution) {
+      var text = resolution < 5000 ? feature.get('name') : '';
+      if (!highlightStyleCache[text]) {
+        highlightStyleCache[text] = [new ol.style.Style({
+          stroke: new ol.style.Stroke({
+            color: '#000',
+            width: 1,
+            lineDash: [5,5]
+          }),
+          fill: new ol.style.Fill({
+            color: 'rgba(255,0,0,0.0)'
+          }),
+          text: new ol.style.Text({
+            font: '12px Calibri,sans-serif',
+            text: text,
+            fill: new ol.style.Fill({
+              color: '#000'
+            }),
+            stroke: new ol.style.Stroke({
+              color: '#f0',
+              width: 3
+            })
+          })
+        })];
+      }
+      return highlightStyleCache[text];
+    }
+  });
+
+  var displayFeatureInfo = function(pixel) {
+    var highlight_features = [];
+    var info_string = '<table class="feature_highlight"><tr><th>Datatype</th><th>Remote Path</th></tr>';
+    var features_displayed = {};
+    var keys = [];
+    featureOverlay.getFeatures().clear();
+
+    var feature = map.forEachFeatureAtPixel(pixel, function(feature, layer) {
+      if (!(feature.get('path') in features_displayed)) {
+        features_displayed[feature.get('path')] = feature.get('data_type');
+        keys.push(feature.get('path'));
+        highlight_features.push(feature);
+      }
+    });
+    keys.sort();
+    for (var i = 0; i < keys.length; i++) {
+      info_string = info_string + '<tr><td class="datatype">' + features_displayed[keys[i]] + '</td><td class="path">' + keys[i] + ': ' + '</td></tr>';
+    }
+
+    if (keys.length === 0) {
+      info_string = info_string + "<tr><td>n/a</td><td>n/a</td></tr>"
+    }
+
+    info_string = info_string + '</table>';
+    var info = document.getElementById('info');
+    info.innerHTML = info_string;
+
+    for (var i = 0; i < highlight_features.length; i++) {
+      featureOverlay.addFeature(highlight_features[i]);
+    }
+  };
+
+  map.on('pointermove', function(evt) {
+    if (evt.dragging) {
+      return;
+    }
+    var pixel = map.getEventPixel(evt.originalEvent);
+    displayFeatureInfo(pixel);
+  });
+
+  map.on('click', function(evt) {
+    displayFeatureInfo(evt.pixel);
+  });
+
+
+
+</script>
+</body>
+</html>""")
 
 
 def launch_data_server(data_directory, hostname, port):
