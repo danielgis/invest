@@ -131,8 +131,15 @@ class DataServer(object):
         db_cursor.execute(selection_command)
         path_hash, path = db_cursor.fetchone()
         db_connection.close()
-        return path
 
+        working_dir = tempfile.mkdtemp()
+        shutil.copyfile(
+            path, os.path.join(working_dir, os.path.basename(path)))
+
+        result = path_to_zip_string(working_dir)
+        # clean up intermediate result
+        shutil.rmtree(working_dir)
+        return result
 
 
     def add_search_directory(self, search_directory_list):
