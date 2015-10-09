@@ -80,7 +80,6 @@ def reproject_bounding_box(bounding_box, source_proj, out_proj):
         transformed_points[0][1],
         ]
 
-    print transformed_points
     union_functions = [min, max, max, min]
     for point in transformed_points:
         for i in range(2):
