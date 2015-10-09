@@ -22,7 +22,6 @@ def main():
         19.999583793396596]
     data_id = "3d921d0fe6d31d2a76fa1e3923098bf6ee0f62da"
     data_tile = data_server.fetch_data_tile(bounding_box, data_id)
-    print data_tile
     open('data_tile.zip', 'wb').write(data_tile)
 
 
