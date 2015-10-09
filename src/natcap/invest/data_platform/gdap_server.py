@@ -39,7 +39,6 @@ def path_to_zip_string(path):
     """
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix='.zip')
-    print tmp_path
     abs_path = os.path.abspath(path)
     with zipfile.ZipFile(tmp_path, 'w') as out_zip_file:
         for root, _, files in os.walk(path):
