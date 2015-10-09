@@ -6,9 +6,8 @@ import tempfile
 import logging
 import sqlite3
 import zipfile
-import glob
 import hashlib
-import pprint
+import shutil
 
 from osgeo import gdal
 from osgeo import ogr
@@ -24,6 +23,36 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 LOGGER = logging.getLogger('natcap.invest.data_platform.data_server')
 
 Pyro4.config.SERIALIZER = 'marshal'  # lets us pass null bytes in strings
+
+
+def path_to_zip_string(path):
+    """Recursively zips the files in the path and returns a binary string that
+    is a zipfile of those data.
+
+    Parameters:
+        path (string): path in which to recursively gather files into zipfile
+
+    Returns:
+        a binary string which can be written to disk as a zipfile archive of
+        the files and directories under `path`
+    """
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.zip')
+    print tmp_path
+    abs_path = os.path.abspath(path)
+    with zipfile.ZipFile(tmp_path, 'w') as out_zip_file:
+        for root, _, files in os.walk(path):
+            local_path = os.path.relpath(root, abs_path)
+            for filename in files:
+                out_zip_file.write(
+                    os.path.join(root, filename),
+                    os.path.join(local_path, filename))
+    os.close(tmp_fd)
+    tmp_file = open(tmp_path, 'rb')
+    result = tmp_file.read()
+    tmp_file.close()
+    os.remove(tmp_path)
+    return result
 
 
 class DataServer(object):
@@ -52,8 +81,17 @@ class DataServer(object):
         ('path_hash', ' text PRIMARY KEY'),
     ]
 
-    def __init__(self, database_filepath, search_directory_list):
-        """build a server w/ files in that directory"""
+    def __init__(self, database_filepath):
+        """Initialize GDAP server and its database if it doesn't exist.
+
+        Parameters:
+            database_filepath (string): path to either an existing SQLite
+                database, or a path to the desired location for one.  If
+                the file doesn't exist a new one is created with the
+                predefined data schema.
+
+        Returns:
+            None."""
 
         self.database_filepath = database_filepath
         filepath_directory = os.path.dirname(self.database_filepath)
@@ -70,44 +108,64 @@ class DataServer(object):
         db_connection.commit()
         db_connection.close()
 
+    def add_search_directory(self, search_directory_list):
+        """Recursively search through a list of directories and add any viable
+        GIS data types to the database.
+
+        Parameters:
+            search_directory_list (list): A list of directory paths in which to
+                recursively search through for GIS data types to index.
+
+        Returns:
+            None
+        """
         raster_paths = []
         vector_paths = []
 
         LOGGER.info("scanning directory")
-        for root, dirs, files in os.walk(search_directory_list):
-            if any(x in root for x in ['.svn']):
-                continue
-            if natcap.invest.utils.is_gdal_type(root):
-                raster_paths.append(root)
-                dirs.clear()
-                continue
-            if natcap.invest.utils.is_ogr_type(root):
-                vector_paths.append(root)
-                dirs.clear()
-                continue
+        for directory_path in search_directory_list:
+            for root, dirs, files in os.walk(directory_path):
+                # skip any .svn directories
+                if any(x in root for x in ['.svn']):
+                    continue
 
-            # check if any dirs are GIS types and prune if so
-            for dir_index in reversed(xrange(len(dirs))):
-                dir_path = os.path.join(root, dirs[dir_index])
-                if natcap.invest.utils.is_gdal_type(dir_path):
-                    raster_paths.append(dir_path)
-                elif natcap.invest.utils.is_ogr_type(dir_path):
-                    vector_paths.append(dir_path)
-                else:
+                # check to see if the root is a GIS type, skip any subdirs if
+                # so
+                if natcap.invest.utils.is_gdal_type(root):
+                    raster_paths.append(root)
+                    dirs.clear()
                     continue
-                # if we get here, the directory is either a raster or vector
-                # so no need to pick up subdirs
-                del dirs[dir_index]
-            for filename in files:
-                file_path = os.path.join(root, filename)
-                if any(file_path.endswith(suffix) for suffix in [
-                        '.xml', '.hdr', '.tfw', '.gfs', '.lyr', '.xls',
-                        '.pdf', '.txt', '.zip']):
+                if natcap.invest.utils.is_ogr_type(root):
+                    vector_paths.append(root)
+                    dirs.clear()
                     continue
-                if natcap.invest.utils.is_gdal_type(file_path):
-                    raster_paths.append(file_path)
-                elif natcap.invest.utils.is_ogr_type(file_path):
-                    vector_paths.append(file_path)
+
+                # check if any dirs are GIS types and prune if so
+                for dir_index in reversed(xrange(len(dirs))):
+                    dir_path = os.path.join(root, dirs[dir_index])
+                    if natcap.invest.utils.is_gdal_type(dir_path):
+                        raster_paths.append(dir_path)
+                    elif natcap.invest.utils.is_ogr_type(dir_path):
+                        vector_paths.append(dir_path)
+                    else:
+                        continue
+                    # if we get here, the directory is either a raster or
+                    # vector so no need to pick up subdirs
+                    del dirs[dir_index]
+
+                # test all the raw files
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    # ignore these commonly existing, but known to not be GIS
+                    # type files
+                    if any(file_path.endswith(suffix) for suffix in [
+                            '.xml', '.hdr', '.tfw', '.gfs', '.lyr', '.xls',
+                            '.pdf', '.txt', '.zip']):
+                        continue
+                    if natcap.invest.utils.is_gdal_type(file_path):
+                        raster_paths.append(file_path)
+                    elif natcap.invest.utils.is_ogr_type(file_path):
+                        vector_paths.append(file_path)
 
         data_hash = {}
         LOGGER.info("calculating bounding boxes")
@@ -166,32 +224,34 @@ class DataServer(object):
         return natcap.invest.__version__
 
     def get_data_preview(self):
-        """get data from bounding box"""
+        """Build an OpenLayers based HTML preview page that highlights the
+        GIS data sources' bounding boxes on a global map.
 
-        #for data_type in self._STATIC_DATA_TYPES:
-        #ZIP and stream the result back
-        shapefile_filename = 'coverage_preview.geojson'
+        Parameters:
+            none
+
+        Returns:
+            A binary string which can be interpreted as a zipfile
+        get data from bounding box"""
+
+        working_dir = tempfile.mkdtemp()
+
+        shapefile_path = os.path.join(working_dir, 'coverage_preview.geojson')
         driver = ogr.GetDriverByName('GeoJSON')
-
-        if os.path.isfile(shapefile_filename):
-            os.remove(shapefile_filename)
-        datasource = driver.CreateDataSource(shapefile_filename)
+        vector = driver.CreateDataSource(shapefile_path)
 
         lat_lng_projection = osr.SpatialReference()
-        lat_lng_projection.ImportFromEPSG(4326)
-        out_projection = osr.SpatialReference()
-        #out_projection.ImportFromEPSG(4326)  # EPSG 4326 is lat/lng
-        out_projection.ImportFromEPSG(3857)  # EPSG 4326 is lat/lng
-        transform = osr.CoordinateTransformation(lat_lng_projection, out_projection)
-        polygon_layer = datasource.CreateLayer(
-            'coverage_preview', out_projection, ogr.wkbPolygon)
+        lat_lng_projection.ImportFromEPSG(4326)  # EPSG 4326 is WGS84 lat/lng
+        mercator_projection = osr.SpatialReference()
+        mercator_projection.ImportFromEPSG(3857)  # EPSG 3857 is Mercator
+        lat_to_merc_transform = osr.CoordinateTransformation(
+            lat_lng_projection, mercator_projection)
+        polygon_layer = vector.CreateLayer(
+            'coverage_preview', mercator_projection, ogr.wkbPolygon)
 
-        polygon_layer.CreateField(
-            ogr.FieldDefn('data_type', ogr.OFTString))
-        polygon_layer.CreateField(
-            ogr.FieldDefn('gis_type', ogr.OFTString))
-        polygon_layer.CreateField(
-            ogr.FieldDefn('path', ogr.OFTString))
+        polygon_layer.CreateField(ogr.FieldDefn('data_type', ogr.OFTString))
+        polygon_layer.CreateField(ogr.FieldDefn('gis_type', ogr.OFTString))
+        polygon_layer.CreateField(ogr.FieldDefn('path', ogr.OFTString))
 
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
@@ -215,8 +275,8 @@ class DataServer(object):
                 point_max = ogr.CreateGeometryFromWkt(
                     "POINT (%f %f)" % (bounding_box[2], bounding_box[3]))
 
-                point_min.Transform(transform)
-                point_max.Transform(transform)
+                point_min.Transform(lat_to_merc_transform)
+                point_max.Transform(lat_to_merc_transform)
 
                 x_min = point_min.GetX()
                 y_min = point_min.GetY()
@@ -235,7 +295,7 @@ class DataServer(object):
 
                 poly = ogr.Geometry(ogr.wkbPolygon)
                 poly.AddGeometry(ring)
-                poly.Transform(transform)
+                poly.Transform(lat_to_merc_transform)
                 feature = ogr.Feature(polygon_layer.GetLayerDefn())
                 feature.SetGeometry(poly)
                 feature.SetField('data_type', str(data_type))
@@ -246,8 +306,15 @@ class DataServer(object):
                 LOGGER.warn(
                     'unable to do this thing for %s (%s)', line,
                     str(exception))
-        datasource.SyncToDisk()
-        webpage_out = open('overview.html', 'w')
+
+        # close the vector so we can delete it later
+        vector.SyncToDisk()
+        polygon_layer = None
+        ogr.DataSource.__swig_destroy__(vector)
+        vector = None
+
+        webpage_out = open(
+            os.path.join(working_dir, 'coverage_preview.html'), 'w')
         webpage_out.write("""<!DOCTYPE html>
 <html>
 <head>
@@ -454,6 +521,11 @@ table {
 </script>
 </body>
 </html>""")
+        webpage_out.close()
+        result = path_to_zip_string(working_dir)
+        # clean up intermediate result
+        shutil.rmtree(working_dir)
+        return result
 
 
 def launch_data_server(data_directory, hostname, port):
