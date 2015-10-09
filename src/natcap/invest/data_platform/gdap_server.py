@@ -108,6 +108,33 @@ class DataServer(object):
         db_connection.commit()
         db_connection.close()
 
+    def fetch_data_tile(self, bounding_box, data_id):
+        """Return a binary raster or vector zipfile string clipped to the
+        bounding box of the indicated id
+
+        Parameters:
+            bounding_box (list): lat/lng of bounding box of the form
+                TODO: DEFINE form
+            data_id (string): hash to index into the local database file
+
+        Returns:
+            binary string that can be saved as a zipfile that contains the
+            clipped requested data
+        """
+        db_connection = sqlite3.connect(self.database_filepath)
+        db_cursor = db_connection.cursor()
+
+        selection_command = (
+            "SELECT path_hash, path "
+            "FROM %s " % self._DATA_TABLE_NAME +
+            " WHERE path_hash = '%s';" % data_id)
+        db_cursor.execute(selection_command)
+        path_hash, path = db_cursor.fetchone()
+        db_connection.close()
+        return path
+
+
+
     def add_search_directory(self, search_directory_list):
         """Recursively search through a list of directories and add any viable
         GIS data types to the database.
