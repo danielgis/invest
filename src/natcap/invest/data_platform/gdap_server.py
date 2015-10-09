@@ -9,6 +9,7 @@ import zipfile
 import hashlib
 import shutil
 
+import shapely
 from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
@@ -256,6 +257,55 @@ class DataServer(object):
     def get_server_version():
         """Returns a server version string to the client"""
         return natcap.invest.__version__
+
+    def get_data_coverage(self, bounding_box, data_type_list):
+        """Returns a list of (data_id, datatype) pairs that can be retrieved
+        with `fetch_data_tile`
+
+        Parameters:
+            bounding_box (list): in WSG84 projection:
+                [x_min, y_max, x_max, y_min]
+            data_type_list (list): a list of strings that can be found in
+            self._STATIC_DATA_TYPES.  If empty list, ALL types are returned.
+
+        Returns:
+            List of (data_id, datatype) pairs where the data_id can be
+            passed to `fetch_data_tile`
+        """
+        db_connection = sqlite3.connect(self.database_filepath)
+        db_cursor = db_connection.cursor()
+        selection_command = (
+            "SELECT bounding_box, path_hash, data_type "
+            "FROM %s " % self._DATA_TABLE_NAME +
+            " OR ".join([
+                "WHERE data_type = '%s'" % data_type for data_type in
+                data_type_list]) + ';')
+        db_result = db_cursor.execute(selection_command)
+
+        bounding_coords = [
+            (bounding_box[0], bounding_box[1]),
+            (bounding_box[2], bounding_box[1]),
+            (bounding_box[2], bounding_box[3]),
+            (bounding_box[0], bounding_box[3]),
+            (bounding_box[0], bounding_box[1]),
+            ]
+        bounding_poly = shapely.geometry.Polygon(bounding_coords)
+        result_list = []
+        for bounding_box_string, path_hash, data_type in db_result:
+            local_bounding_box = [
+                float(x) for x in bounding_box_string[1:-1].split(',')]
+            local_bounding_coords = [
+                (local_bounding_box[0], local_bounding_box[1]),
+                (local_bounding_box[2], local_bounding_box[1]),
+                (local_bounding_box[2], local_bounding_box[3]),
+                (local_bounding_box[0], local_bounding_box[3]),
+                (local_bounding_box[0], local_bounding_box[1]),
+                ]
+            local_bounding_poly = shapely.geometry.Polygon(
+                local_bounding_coords)
+            if local_bounding_poly.intersects(bounding_poly):
+                result_list.append((path_hash, data_type))
+        return result_list
 
     def get_data_preview(self):
         """Build an OpenLayers based HTML preview page that highlights the
