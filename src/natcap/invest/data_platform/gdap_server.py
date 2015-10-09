@@ -121,24 +121,54 @@ class DataServer(object):
             binary string that can be saved as a zipfile that contains the
             clipped requested data
         """
+
+        # Make a bounding box polygon for clipping
+        bounding_box_dir = tempfile.mkdtemp()
+        bounding_box_path = os.path.join(
+            bounding_box_dir, 'bounding_box.geojson')
+        driver = ogr.GetDriverByName('GeoJSON')
+        vector = driver.CreateDataSource(bounding_box_path)
+        lat_lng_projection = osr.SpatialReference()
+        lat_lng_projection.ImportFromEPSG(4326)  # EPSG 4326 is WGS84 lat/lng
+        polygon_layer = vector.CreateLayer(
+            'bounding_box', lat_lng_projection, ogr.wkbPolygon)
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        x_min, y_max, x_max, y_min = bounding_box
+        ring.AddPoint(x_min, y_max)
+        ring.AddPoint(x_min, y_min)
+        ring.AddPoint(x_max, y_min)
+        ring.AddPoint(x_max, y_max)
+        ring.AddPoint(x_min, y_max)
+        poly = ogr.Geometry(ogr.wkbPolygon)
+        poly.AddGeometry(ring)
+        feature = ogr.Feature(polygon_layer.GetLayerDefn())
+        feature.SetGeometry(poly)
+        polygon_layer.CreateFeature(feature)
+        polygon_layer = None
+        ogr.DataSource.__swig_destroy__(vector)
+        vector = None
+
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
-
         selection_command = (
-            "SELECT path_hash, path "
+            "SELECT path "
             "FROM %s " % self._DATA_TABLE_NAME +
             " WHERE path_hash = '%s';" % data_id)
         db_cursor.execute(selection_command)
-        path_hash, path = db_cursor.fetchone()
+        path = db_cursor.fetchone()[0]
         db_connection.close()
 
         working_dir = tempfile.mkdtemp()
-        shutil.copyfile(
-            path, os.path.join(working_dir, os.path.basename(path)))
+        out_raster_path = os.path.join(working_dir, os.path.basename(path))
+        pygeoprocessing.clip_dataset_uri(
+            path, bounding_box_path, out_raster_path, assert_projections=False,
+            all_touched=True)
 
         result = path_to_zip_string(working_dir)
         # clean up intermediate result
         shutil.rmtree(working_dir)
+        shutil.rmtree(bounding_box_dir)
+
         return result
 
 

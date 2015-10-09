@@ -37,7 +37,7 @@ def main():
     print '%d files to fetch ' % len(data_coverage_list)
     for data_id, _ in data_coverage_list:
         print 'fetch %s' % data_id
-        data_tile = data_server.fetch_data_tile(aoi_bounding_box, data_id)
+        data_tile = data_server.fetch_data_tile(lat_lng_bounding_box, data_id)
         result_zip_uri = 'data_tile.zip'
         open(result_zip_uri, 'wb').write(data_tile)
         zipfile.ZipFile(result_zip_uri, 'r').extractall('.')
