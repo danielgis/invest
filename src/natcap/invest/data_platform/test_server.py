@@ -1,6 +1,8 @@
 """test for gdap_server"""
 
 import sys
+import os
+import zipfile
 
 import pygeoprocessing
 import natcap.invest.data_platform.gdap_server
@@ -32,9 +34,14 @@ def main():
 
     data_coverage_list = data_server.get_data_coverage(
         lat_lng_bounding_box, ['dem'])
-    print data_coverage_list
-    #data_tile = data_server.fetch_data_tile(bounding_box, data_id)
-    #open('data_tile.zip', 'wb').write(data_tile)
+    print '%d files to fetch ' % len(data_coverage_list)
+    for data_id, _ in data_coverage_list:
+        print 'fetch %s' % data_id
+        data_tile = data_server.fetch_data_tile(aoi_bounding_box, data_id)
+        result_zip_uri = 'data_tile.zip'
+        open(result_zip_uri, 'wb').write(data_tile)
+        zipfile.ZipFile(result_zip_uri, 'r').extractall('.')
+        os.remove(result_zip_uri)
 
 
 if __name__ == '__main__':
