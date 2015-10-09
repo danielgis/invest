@@ -29,6 +29,70 @@ def is_ogr_type(arg):
     return False
 
 
+def reproject_bounding_box(bounding_box, source_proj, out_proj):
+    """Reproject bounding box to destination source reference system accounting
+    for the possibility of warping due to different projections.
+
+    Parameters:
+        bounding_box (list): format of
+            [upper_left_x, upper_left_y, lower_right_x, lower_right_y]
+            This convention comes from pygeoprocessing v0.3.0 and is expected
+            to change in later versions.
+        source_proj (osr.SpatialReference): spatial reference for bounding_box
+            coordinates
+        out_proj (osr.SpatialReference): spatial reference for desired
+            transformed bounding_box coordinates
+
+    Returns:
+        Transformed `bounding_box` coordinates from `source_proj` to `out_proj`
+    """
+    # make points for each corner
+    bounding_box_points = []
+    bounding_box_points.append((bounding_box[0], bounding_box[1]))
+    bounding_box_points.append((bounding_box[2], bounding_box[1]))
+    bounding_box_points.append((bounding_box[2], bounding_box[3]))
+    bounding_box_points.append((bounding_box[0], bounding_box[3]))
+
+    # calculate intermediate points to account for warping when reprojecting
+    bounding_box_points.append(
+        ((bounding_box[0]+bounding_box[2])/2.0, bounding_box[1]))
+    bounding_box_points.append(
+        (bounding_box[2], (bounding_box[1]+bounding_box[3])/2.0))
+    bounding_box_points.append(
+        ((bounding_box[0]+bounding_box[2])/2.0, bounding_box[3]))
+    bounding_box_points.append(
+        (bounding_box[0], (bounding_box[1]+bounding_box[3])/2.0))
+
+    transformer = osr.CoordinateTransformation(
+        source_proj, out_proj)
+
+    transformed_points = []
+    for point in bounding_box_points:
+        x_coord, y_coord, _ = transformer.TransformPoint(point[0], point[1])
+        transformed_points.append((x_coord, y_coord))
+
+    # find the biggest bounding box around the points, initialize to the
+    # first point
+    out_bounding_box = [
+        transformed_points[0][0],
+        transformed_points[0][1],
+        transformed_points[0][0],
+        transformed_points[0][1],
+        ]
+
+    print transformed_points
+    union_functions = [min, max, max, min]
+    for point in transformed_points:
+        for i in range(2):
+            # x compare
+            out_bounding_box[i*2] = union_functions[i*2](
+                point[0], out_bounding_box[i*2])
+            # y compare
+            out_bounding_box[i*2+1] = union_functions[i*2+1](
+                point[1], out_bounding_box[i*2+1])
+    return out_bounding_box
+
+
 def calculate_args_bounding_box(args_dict):
     """Parse through an InVEST style args dict and calculate the bounding boxes
     of any paths that can be interpreted as GIS types.
@@ -82,9 +146,9 @@ def calculate_args_bounding_box(args_dict):
             arg (dict): contains string keys and pairs that might be files to
                 gis types.  They can be any other type, including dictionaries.
             bb_intersection (list or None): if list, has the form
-                [xmin, ymin, xmax, ymax], where coordinates are in lng, lat
+                [upper_left_x, upper_left_y, lower_right_x, lower_right_y], where coordinates are in lng, lat
             bb_union (list or None): if list, has the form
-                [xmin, ymin, xmax, ymax], where coordinates are in lng, lat
+                [upper_left_x, upper_left_y, lower_right_x, lower_right_y], where coordinates are in lng, lat
 
         Returns:
             (intersection, union) bounding box tuples of all filepaths to GIS
