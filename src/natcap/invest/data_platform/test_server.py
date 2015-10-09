@@ -33,7 +33,7 @@ def main():
         aoi_bounding_box, aoi_projection, lat_lng_projection)
 
     data_coverage_list = data_server.get_data_coverage(
-        lat_lng_bounding_box, ['dem'])
+        lat_lng_bounding_box, [])
     print '%d files to fetch ' % len(data_coverage_list)
     for data_id, _ in data_coverage_list:
         print 'fetch %s' % data_id
