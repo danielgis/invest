@@ -22,12 +22,12 @@ __all__ = ['is_release', 'local_dir', 'test', 'PYGEOPROCESSING_REQUIRED']
 # PEP440-compliant and it's very likely that a dev version of pygeoprocessing
 # will be found.
 PYGEOPROCESSING_REQUIRED = '0.3.0a9'
-if (pkg_resources.parse_version(pygeoprocessing.__version__) <
+"""if (pkg_resources.parse_version(pygeoprocessing.__version__) <
         pkg_resources.parse_version(PYGEOPROCESSING_REQUIRED)):
     raise ValueError(('Pygeoprocessing >= {req_version} required, '
                       'but version {found_ver} was found').format(
                           req_version=PYGEOPROCESSING_REQUIRED,
-                          found_ver=pygeoprocessing.__version__))
+                          found_ver=pygeoprocessing.__version__))"""
 
 __version__ = natcap.versioner.get_version('natcap.invest')
 

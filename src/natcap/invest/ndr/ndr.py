@@ -167,8 +167,6 @@ def execute(args):
 
     dem_row, dem_col = pygeoprocessing.get_row_col_from_uri(dem_uri)
     lulc_row, lulc_col = pygeoprocessing.get_row_col_from_uri(lulc_uri)
-    LOGGER.debug(
-        "dem_uri, lulc_uri sizes %d %d %d %d", dem_row, dem_col, lulc_row, lulc_col)
 
     nodata_landuse = pygeoprocessing.geoprocessing.get_nodata_from_uri(
         lulc_uri)
@@ -380,11 +378,16 @@ def execute(args):
     LOGGER.info("calculating %s", s_bar_uri)
 
     def bar_op(base_accumulation, flow_accumulation):
-        """Calcualtes the bar operation"""
-        return numpy.where(
+        """Calculates the bar operation"""
+        result = numpy.empty(base_accumulation.shape)
+        result[:] = s_bar_nodata
+        valid_mask = (
             (base_accumulation != s_bar_nodata) &
-            (flow_accumulation != flow_accumulation_nodata),
-            base_accumulation / flow_accumulation, s_bar_nodata)
+            (flow_accumulation != flow_accumulation_nodata))
+        result[valid_mask] = (
+            base_accumulation[valid_mask] / flow_accumulation[valid_mask])
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [s_accumulation_uri, flow_accumulation_uri], bar_op, s_bar_uri,
         gdal.GDT_Float32, s_bar_nodata, out_pixel_size, "intersection",
@@ -395,16 +398,23 @@ def execute(args):
     cell_area = out_pixel_size ** 2
     d_up_nodata = -1.0
 
-    def d_up(s_bar, flow_accumulation):
+    def d_up_op(s_bar, flow_accumulation):
         """Calculate the d_up index
             w_bar * s_bar * sqrt(upstream area) """
-        d_up_array = s_bar * numpy.sqrt(flow_accumulation * cell_area)
-        return numpy.where(
+        result = numpy.empty(s_bar.shape)
+        result[:] = d_up_nodata
+
+        valid_mask = (
             (s_bar != s_bar_nodata) &
-            (flow_accumulation != flow_accumulation_nodata), d_up_array,
-            d_up_nodata)
+            (flow_accumulation != flow_accumulation_nodata))
+
+        result[valid_mask] = (
+            s_bar[valid_mask] * numpy.sqrt(
+                flow_accumulation[valid_mask] * cell_area))
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        [s_bar_uri, flow_accumulation_uri], d_up, d_up_uri,
+        [s_bar_uri, flow_accumulation_uri], d_up_op, d_up_uri,
         gdal.GDT_Float32, d_up_nodata, out_pixel_size, "intersection",
         dataset_to_align_index=0, vectorize_op=False)
 
@@ -418,8 +428,11 @@ def execute(args):
     def s_inverse_op(s_factor):
         """calcualtes the inverse of the s factor so we can multiply it like
             a factor"""
-        return numpy.where(
-            s_factor != slope_nodata, 1.0 / s_factor, s_nodata)
+        result = numpy.empty(s_factor.shape)
+        result[:] = s_nodata
+        valid_mask = s_factor != slope_nodata
+        result[valid_mask] = 1.0 / s_factor[valid_mask]
+        return result
 
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [thresholded_slope_uri], s_inverse_op, s_factor_inverse_uri,
@@ -446,12 +459,15 @@ def execute(args):
     d_dn_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(d_dn_uri)
 
     def ic_op(d_up, d_dn):
-        """calc the ic factor"""
-        nodata_mask = (
-            (d_up == d_up_nodata) | (d_dn == d_dn_nodata) | (d_up == 0) |
-            (d_dn == 0))
-        return numpy.where(
-            nodata_mask, ic_nodata, numpy.log10(d_up/d_dn))
+        """calc the ic factor log_10(d_up/d_dn)"""
+        valid_mask = (
+            (d_up != d_up_nodata) & (d_dn != d_dn_nodata) & (d_up != 0) &
+            (d_dn != 0))
+        result = numpy.empty(d_up.shape)
+        result[:] = ic_nodata
+        result[valid_mask] = numpy.log10(d_up[valid_mask]/d_dn[valid_mask])
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [d_up_uri, d_dn_uri], ic_op, ic_factor_uri,
         gdal.GDT_Float32, ic_nodata, out_pixel_size, "intersection",
@@ -490,11 +506,16 @@ def execute(args):
 
         def calculate_ndr(effective_retention_array, ic_array):
             '''calcualte NDR'''
-            return numpy.where(
-                (effective_retention_array == effective_retention_nodata)
-                | (ic_array == ic_nodata),
-                ndr_nodata, (1.0 - effective_retention_array) /
-                (1.0 + numpy.exp((ic_0_param - ic_array) / k_param)))
+            result = numpy.empty(effective_retention_array.shape)
+            result[:] = ndr_nodata
+            valid_mask = (
+                (effective_retention_array != effective_retention_nodata) &
+                (ic_array != ic_nodata))
+            result[valid_mask] = (
+                (1.0 - effective_retention_array[valid_mask]) /
+                (1.0 + numpy.exp((
+                    ic_0_param - ic_array[valid_mask]) / k_param)))
+            return result
 
         pygeoprocessing.geoprocessing.vectorize_datasets(
             [effective_retention_uri, ic_factor_uri], calculate_ndr, ndr_uri,
@@ -518,10 +539,14 @@ def execute(args):
 
         def calculate_sub_ndr(sub_effective_retention_array):
             '''calcualte NDR'''
-            return numpy.where(
-                (sub_effective_retention_array ==
-                 sub_effective_retention_nodata), ndr_nodata,
-                (1.0 - sub_effective_retention_array))
+            result = numpy.empty(sub_effective_retention_array.shape)
+            result[:] = ndr_nodata
+            valid_mask = (
+                sub_effective_retention_array !=
+                sub_effective_retention_nodata)
+            result[valid_mask] = (
+                1.0 - sub_effective_retention_array[valid_mask])
+            return result
 
         pygeoprocessing.geoprocessing.vectorize_datasets(
             [sub_effective_retention_uri], calculate_sub_ndr, sub_ndr_uri,
@@ -538,10 +563,14 @@ def execute(args):
         def calculate_export(
                 load_array, ndr_array, sub_load_array, sub_ndr_array):
             '''combine ndr and subsurface ndr'''
-            return numpy.where(
-                (load_array == load_nodata) | (ndr_array == ndr_nodata),
-                export_nodata, load_array * ndr_array +
-                sub_load_array * sub_ndr_array)
+            result = numpy.empty(load_array.shape)
+            result[:] = export_nodata
+            valid_mask = (
+                (load_array != load_nodata) & (ndr_array != ndr_nodata))
+            result[valid_mask] = (
+                load_array[valid_mask] * ndr_array[valid_mask] +
+                sub_load_array[valid_mask] * sub_ndr_array[valid_mask])
+            return result
 
         pygeoprocessing.geoprocessing.vectorize_datasets(
             [load_uri[nutrient], ndr_uri, sub_load_uri[nutrient], sub_ndr_uri],
