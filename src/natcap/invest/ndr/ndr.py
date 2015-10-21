@@ -583,11 +583,16 @@ def execute(args):
             load_uri[nutrient], args['watersheds_uri'], 'ws_id').total
         export_tot = pygeoprocessing.geoprocessing.aggregate_raster_values_uri(
             export_uri[nutrient], args['watersheds_uri'], 'ws_id').total
+        retention_tot = dict(
+            (ws_id, load_tot[ws_id] - export_tot[ws_id]) for ws_id in load_tot)
 
         field_summaries['%s_load_tot' % nutrient] = load_tot
         field_summaries['%s_exp_tot' % nutrient] = export_tot
+        field_summaries['%s_ret_tot' % nutrient] = retention_tot
+
         field_header_order = (
-            [x % nutrient for x in ['%s_load_tot', '%s_exp_tot']] +
+            [x % nutrient for x in
+             ['%s_load_tot', '%s_exp_tot', '%s_ret_tot']] +
             field_header_order)
 
     LOGGER.info('Writing summaries to output shapefile')
