@@ -111,13 +111,13 @@ def execute(args):
 
     if not args['calc_p'] and not args['calc_n']:
         raise Exception(
-            'Neither "Calculate Nitrogen" nor "Calculate Phosporus" is '
+            'Neither "Calculate Nitrogen" nor "Calculate Phosphorus" is '
             'selected.  At least one must be selected.')
 
     #Load all the tables for preprocessing
     workspace = args['workspace_dir']
-    output_dir = os.path.join(workspace, 'output')
-    intermediate_dir = os.path.join(workspace, 'intermediate')
+    output_dir = os.path.join(workspace, '.')
+    intermediate_dir = os.path.join(workspace, 'intermediate_outputs')
 
     try:
         file_suffix = args['results_suffix']
