@@ -197,9 +197,17 @@ def execute(args):
     nodata_rkls = pygeoprocessing.geoprocessing.get_nodata_from_uri(rkls_uri)
     nodata_cp = pygeoprocessing.geoprocessing.get_nodata_from_uri(cp_factor_uri)
     nodata_usle = -1.0
+
     def mult_rkls_cp(rkls, cp_factor, stream):
-        return numpy.where((rkls == nodata_rkls) | (cp_factor == nodata_cp),
-            nodata_usle, rkls * cp_factor * (1 - stream))
+        """Multiply the rkls by cp and stream factor to create usle"""
+        result = numpy.empty(rkls.shape)
+        result[:] = nodata_usle
+        valid_mask = (rkls != nodata_rkls) & (cp_factor != nodata_cp)
+        result[valid_mask] = (
+            rkls[valid_mask] * cp_factor[valid_mask] *
+            (1 - stream[valid_mask]))
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [rkls_uri, cp_factor_uri, stream_uri], mult_rkls_cp, usle_uri,
         gdal.GDT_Float64, nodata_usle, out_pixel_size, "intersection",
@@ -236,14 +244,23 @@ def execute(args):
     w_bar_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(w_accumulation_uri)
     s_bar_uri = os.path.join(intermediate_dir, 's_bar%s.tif' % file_suffix)
     s_bar_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(s_accumulation_uri)
+    bar_nodata = None
     for bar_nodata, accumulation_uri, bar_uri in [
             (w_bar_nodata, w_accumulation_uri, w_bar_uri),
             (s_bar_nodata, s_accumulation_uri, s_bar_uri)]:
         LOGGER.info("calculating %s", accumulation_uri)
+
         def bar_op(base_accumulation, flow_accumulation):
-            return numpy.where(
-                (base_accumulation != bar_nodata) & (flow_accumulation != flow_accumulation_nodata),
-                base_accumulation / flow_accumulation, bar_nodata)
+            """calculate sdr_bar by base_accumulation / flow_accumulation"""
+            result = numpy.empty(base_accumulation.shape)
+            result[:] = bar_nodata
+            valid_mask = (
+                (base_accumulation != bar_nodata) &
+                (flow_accumulation != flow_accumulation_nodata))
+            result[valid_mask] = (
+                base_accumulation[valid_mask] / flow_accumulation[valid_mask])
+            return result
+
         pygeoprocessing.geoprocessing.vectorize_datasets(
             [accumulation_uri, flow_accumulation_uri], bar_op, bar_uri,
             gdal.GDT_Float32, bar_nodata, out_pixel_size, "intersection",
@@ -253,14 +270,19 @@ def execute(args):
     d_up_uri = os.path.join(intermediate_dir, 'd_up%s.tif' % file_suffix)
     cell_area = out_pixel_size ** 2
     d_up_nodata = -1.0
+
     def d_up(w_bar, s_bar, flow_accumulation):
-        """Calculate the d_up index
-            w_bar * s_bar * sqrt(upstream area) """
-        d_up_array = w_bar * s_bar * numpy.sqrt(flow_accumulation * cell_area)
-        return numpy.where(
+        """Calculate the d_up index w_bar * s_bar * sqrt(upstream area) """
+        result = numpy.empty(w_bar.shape)
+        result[:] = d_up_nodata
+        valid_mask = (
             (w_bar != w_bar_nodata) & (s_bar != s_bar_nodata) &
-            (flow_accumulation != flow_accumulation_nodata), d_up_array,
-            d_up_nodata)
+            (flow_accumulation != flow_accumulation_nodata))
+        result[valid_mask] = (
+            w_bar[valid_mask] * s_bar[valid_mask] * numpy.sqrt(
+                flow_accumulation[valid_mask] * cell_area))
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [w_bar_uri, s_bar_uri, flow_accumulation_uri], d_up, d_up_uri,
         gdal.GDT_Float32, d_up_nodata, out_pixel_size, "intersection",
@@ -274,10 +296,14 @@ def execute(args):
         preprocessed_data['thresholded_slope_uri'])
 
     def ws_op(w_factor, s_factor):
-        #calculating the inverse so we can use the distance to stream factor function
-        return numpy.where(
-            (w_factor != w_nodata) & (s_factor != slope_nodata),
-            1.0 / (w_factor * s_factor), ws_nodata)
+        """calculate 1.0 / (w * s)"""
+        result = numpy.empty(w_factor.shape)
+        result[:] = ws_nodata
+        valid_mask = (
+            (w_factor != w_nodata) & (s_factor != slope_nodata))
+        result[valid_mask] = (
+            1.0 / (w_factor[valid_mask] * s_factor[valid_mask]))
+        return result
 
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [thresholded_w_factor_uri, thresholded_slope_uri], ws_op, ws_factor_inverse_uri,
@@ -294,10 +320,15 @@ def execute(args):
     ic_nodata = -9999.0
     d_up_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(d_up_uri)
     d_dn_nodata = pygeoprocessing.geoprocessing.get_nodata_from_uri(d_dn_uri)
+
     def ic_op(d_up, d_dn):
-        nodata_mask = (d_up == d_up_nodata) | (d_dn == d_dn_nodata)
-        return numpy.where(
-            nodata_mask, ic_nodata, numpy.log10(d_up/d_dn))
+        """calculate log_10(d_up/d_dn)"""
+        result = numpy.empty(d_up.shape)
+        result[:] = ic_nodata
+        valid_mask = (d_up != d_up_nodata) & (d_dn != d_dn_nodata)
+        result[valid_mask] = numpy.log10(d_up[valid_mask] / d_dn[valid_mask])
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [d_up_uri, d_dn_uri], ic_op, ic_factor_uri,
         gdal.GDT_Float32, ic_nodata, out_pixel_size, "intersection",
@@ -309,12 +340,18 @@ def execute(args):
     k = float(args['k_param'])
     ic_0 = float(args['ic_0_param'])
     sdr_max = float(args['sdr_max'])
+
     def sdr_op(ic_factor, stream):
-        nodata_mask = (ic_factor == ic_nodata)
-        sdr = numpy.where(
-            nodata_mask, sdr_nodata, sdr_max/(1+numpy.exp((ic_0-ic_factor)/k)))
-        #mask out the stream layer
-        return numpy.where(stream == 1, 0.0, sdr)
+        """calculate sdr factor and zero out streams"""
+        result = numpy.empty(ic_factor.shape)
+        result[:] = sdr_nodata
+        valid_mask = (ic_factor != ic_nodata)
+
+        # multiply by the stream mask to set result to 0 on a stream
+        result[valid_mask] = (
+            sdr_max/(1+numpy.exp((ic_0-ic_factor[valid_mask])/k)) * (
+                stream[valid_mask] != 1))
+        return result
 
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [ic_factor_uri, stream_uri], sdr_op, sdr_factor_uri,
@@ -324,20 +361,33 @@ def execute(args):
     LOGGER.info('calculate sed export')
     sed_export_uri = os.path.join(output_dir, 'sed_export%s.tif' % file_suffix)
     sed_export_nodata = -1.0
+
     def sed_export_op(usle, sdr):
-        nodata_mask = (usle == nodata_usle) | (sdr == sdr_nodata)
-        return numpy.where(
-            nodata_mask, sed_export_nodata, usle * sdr)
+        """calculate sediment export by multipling usle by sdr"""
+        result = numpy.empty(usle.shape)
+        result[:] = sed_export_nodata
+        valid_mask = (usle != nodata_usle) & (sdr != sdr_nodata)
+        result[valid_mask] = usle[valid_mask] * sdr[valid_mask]
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
         [usle_uri, sdr_factor_uri], sed_export_op, sed_export_uri,
         gdal.GDT_Float32, sed_export_nodata, out_pixel_size, "intersection",
         dataset_to_align_index=0, vectorize_op=False)
 
     LOGGER.info('calculate sediment retention index')
+
     def sediment_index_op(rkls, usle, sdr_factor):
-        nodata_mask = (rkls == nodata_rkls) | (usle == nodata_usle) | (sdr_factor == sdr_nodata)
-        return numpy.where(
-            nodata_mask, nodata_sed_retention_index, (rkls - usle) * sdr_factor / sdr_max)
+        """calculate an index to estimate the relative amount of retention"""
+        result = numpy.empty(rkls.shape)
+        result[:] = nodata_sed_retention_index
+        valid_mask = (
+            (rkls != nodata_rkls) & (usle != nodata_usle) &
+            (sdr_factor != sdr_nodata))
+        result[valid_mask] = (
+            (rkls[valid_mask] - usle[valid_mask]) *
+            sdr_factor[valid_mask] / sdr_max)
+        return result
 
     nodata_sed_retention_index = -1
     sed_retention_index_uri = os.path.join(
@@ -351,69 +401,80 @@ def execute(args):
     LOGGER.info('calculate sediment retention')
     d_up_bare_soil_uri = os.path.join(intermediate_dir, 'd_up_bare_soil%s.tif' % file_suffix)
     d_up_nodata = -1.0
+
     def d_up_bare_soil_op(s_bar, flow_accumulation):
         """Calculate the d_up index for bare soil
             1.0 * s_bar * sqrt(upstream area) """
-        d_up_array = s_bar * numpy.sqrt(flow_accumulation * cell_area)
-        return numpy.where(
+        result = numpy.empty(s_bar.shape)
+        result[:] = d_up_nodata
+        valid_mask = (
             (s_bar != s_bar_nodata) &
-            (flow_accumulation != flow_accumulation_nodata), d_up_array,
-            d_up_nodata)
+            (flow_accumulation != flow_accumulation_nodata))
+        result[valid_mask] = (
+            s_bar[valid_mask] * numpy.sqrt(
+                flow_accumulation[valid_mask] * cell_area))
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        [s_bar_uri, flow_accumulation_uri], d_up_bare_soil_op, d_up_bare_soil_uri,
-        gdal.GDT_Float32, d_up_nodata, out_pixel_size, "intersection",
-        dataset_to_align_index=0, vectorize_op=False)
+        [s_bar_uri, flow_accumulation_uri], d_up_bare_soil_op,
+        d_up_bare_soil_uri, gdal.GDT_Float32, d_up_nodata, out_pixel_size,
+        "intersection", dataset_to_align_index=0, vectorize_op=False)
 
     #when calculating d_dn_bare the c factors are all 1,
     #so we invert just s, then accumulate it downstream
     s_factor_inverse_uri = os.path.join(
         intermediate_dir, 's_factor_inverse%s.tif' % file_suffix)
     s_nodata = -1.0
-    def s_op(s_factor):
-        #calculating the inverse so we can use the distance to stream factor function
-        return numpy.where(s_factor != slope_nodata, 1.0 / s_factor, s_nodata)
+
+    def s_inv_op(s_factor):
+        """calculates 1/s_factor"""
+        result = numpy.empty(s_factor.shape)
+        result[:] = s_nodata
+        valid_mask = s_factor != slope_nodata
+        result[valid_mask] = 1.0 / s_factor[valid_mask]
+        return result
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        [thresholded_slope_uri], s_op, s_factor_inverse_uri,
+        [thresholded_slope_uri], s_inv_op, s_factor_inverse_uri,
         gdal.GDT_Float32, s_nodata, out_pixel_size, "intersection",
         dataset_to_align_index=0, vectorize_op=False)
-    d_dn_bare_soil_uri = os.path.join(intermediate_dir, 'd_dn_bare_soil%s.tif' % file_suffix)
+    d_dn_bare_soil_uri = os.path.join(
+        intermediate_dir, 'd_dn_bare_soil%s.tif' % file_suffix)
     d_up_nodata = -1.0
     pygeoprocessing.routing.routing_core.distance_to_stream(
-        flow_direction_uri, stream_uri, d_dn_bare_soil_uri, factor_uri=s_factor_inverse_uri)
+        flow_direction_uri, stream_uri, d_dn_bare_soil_uri,
+        factor_uri=s_factor_inverse_uri)
 
     ic_factor_bare_soil_uri = os.path.join(
         intermediate_dir, 'ic_factor_bare_soil%s.tif' % file_suffix)
-    ic_bare_soil_nodata = -9999.0
-    def ic_bare_soil_op(d_up_bare_soil, d_dn_bare_soil):
-        nodata_mask = (d_up_bare_soil == d_up_nodata) | (d_dn_bare_soil == d_dn_nodata)
-        return numpy.where(
-            nodata_mask, ic_nodata, numpy.log10(d_up_bare_soil/d_dn_bare_soil))
+
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        [d_up_bare_soil_uri, d_dn_bare_soil_uri], ic_bare_soil_op, ic_factor_bare_soil_uri,
+        [d_up_bare_soil_uri, d_dn_bare_soil_uri], ic_op, ic_factor_bare_soil_uri,
         gdal.GDT_Float32, ic_nodata, out_pixel_size, "intersection",
         dataset_to_align_index=0, vectorize_op=False)
 
-    sdr_factor_bare_soil_uri = os.path.join(intermediate_dir, 'sdr_factor_bare_soil%s.tif' % file_suffix)
-    def sdr_bare_soil_op(ic_bare_soil_factor, stream):
-        nodata_mask = (ic_bare_soil_factor == ic_nodata)
-        sdr_bare_soil = numpy.where(
-            nodata_mask, sdr_nodata, sdr_max/(1+numpy.exp((ic_0-ic_bare_soil_factor)/k)))
-        #mask out the stream layer
-        return numpy.where(stream == 1, 0.0, sdr_bare_soil)
+    sdr_factor_bare_soil_uri = os.path.join(
+        intermediate_dir, 'sdr_factor_bare_soil%s.tif' % file_suffix)
 
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        [ic_factor_bare_soil_uri, stream_uri], sdr_bare_soil_op, sdr_factor_bare_soil_uri,
+        [ic_factor_bare_soil_uri, stream_uri], sdr_op, sdr_factor_bare_soil_uri,
         gdal.GDT_Float32, sdr_nodata, out_pixel_size, "intersection",
         dataset_to_align_index=0, vectorize_op=False)
 
-    def sediment_retention_bare_soil_op(rkls, usle, stream_factor, sdr_factor, sdr_factor_bare_soil):
-        nodata_mask = (
-            (rkls == nodata_rkls) | (usle == nodata_usle) |
-            (stream_factor == stream_nodata) | (sdr_factor == sdr_nodata) |
-            (sdr_factor_bare_soil == sdr_nodata))
-        return numpy.where(
-            nodata_mask, nodata_sediment_retention,
-            (rkls * sdr_factor_bare_soil - usle * sdr_factor) * (1 - stream_factor))
+    def sediment_retention_bare_soil_op(
+            rkls, usle, stream_factor, sdr_factor, sdr_factor_bare_soil):
+        """Calculate difference of sediment delivery on base and bare soil"""
+        result = numpy.empty(rkls.shape)
+        result[:] = nodata_sediment_retention
+        valid_mask = (
+            (rkls != nodata_rkls) & (usle != nodata_usle) &
+            (stream_factor != stream_nodata) & (sdr_factor != sdr_nodata) &
+            (sdr_factor_bare_soil != sdr_nodata))
+        result[valid_mask] = (
+            (rkls[valid_mask] * sdr_factor_bare_soil[valid_mask] -
+             usle[valid_mask] * sdr_factor[valid_mask]) * (
+                 stream_factor[valid_mask] != 1))
+        return result
 
     nodata_sediment_retention = -1
     sed_retention_bare_soil_uri = os.path.join(
@@ -424,7 +485,6 @@ def execute(args):
         sediment_retention_bare_soil_op, sed_retention_bare_soil_uri,
         gdal.GDT_Float32, nodata_sediment_retention, out_pixel_size, "intersection",
         dataset_to_align_index=0, vectorize_op=False)
-
 
     LOGGER.info('generating report')
     esri_driver = ogr.GetDriverByName('ESRI Shapefile')
@@ -513,18 +573,19 @@ def calculate_ls_factor(
             returns the ls_factor calculation for this point"""
 
         #Skip the calculation if any of the inputs are nodata
-        nodata_mask = (
-            (aspect_angle == aspect_nodata) | (percent_slope == slope_nodata) |
-            (flow_accumulation == flow_accumulation_nodata))
+        valid_mask = (
+            (aspect_angle != aspect_nodata) & (percent_slope != slope_nodata) &
+            (flow_accumulation != flow_accumulation_nodata))
 
         #Here the aspect direction can range from 0 to 2PI, but the purpose
         #of the term is to determine the length of the flow path on the
         #pixel, thus we take the absolute value of each trigonometric
         #function to keep the computation in the first quadrant
-        xij = (numpy.abs(numpy.sin(aspect_angle)) +
-            numpy.abs(numpy.cos(aspect_angle)))
+        xij = (
+            numpy.abs(numpy.sin(aspect_angle[valid_mask])) +
+            numpy.abs(numpy.cos(aspect_angle[valid_mask])))
 
-        contributing_area = (flow_accumulation-1) * cell_area
+        contributing_area = (flow_accumulation[valid_mask]-1) * cell_area
 
         #To convert to radians, we need to divide the percent_slope by 100 since
         #it's a percent.
@@ -532,15 +593,18 @@ def calculate_ls_factor(
 
         #From Equation 4 in "Extension and validation of a geographic
         #information system ..."
-        slope_factor = numpy.where(percent_slope < 9.0,
-            10.8 * numpy.sin(slope_in_radians) + 0.03,
-            16.8 * numpy.sin(slope_in_radians) - 0.5)
+        sin_slope_in_radians = numpy.sin(slope_in_radians[valid_mask])
+        slope_factor = numpy.where(
+            percent_slope[valid_mask] < 9.0,
+            10.8 * sin_slope_in_radians + 0.03,
+            16.8 * sin_slope_in_radians - 0.5)
 
         #Set the m value to the lookup table that's Table 1 in
         #InVEST Sediment Model_modifications_10-01-2012_RS.docx in the
         #FT Team dropbox
-        beta = ((numpy.sin(slope_in_radians) / 0.0896) /
-            (3 * numpy.sin(slope_in_radians)**0.8 + 0.56))
+        beta = (
+            (sin_slope_in_radians / 0.0896) /
+            (3 * sin_slope_in_radians**0.8 + 0.56))
 
         #slope table in percent
         slope_table = [1., 3.5, 5., 9.]
@@ -548,7 +612,8 @@ def calculate_ls_factor(
         #Look up the correct m value from the table
         m_exp = beta/(1+beta)
         for i in range(4):
-            m_exp[percent_slope <= slope_table[i]] = exponent_table[i]
+            m_exp[percent_slope[valid_mask] <= slope_table[i]] = (
+                exponent_table[i])
 
         #The length part of the ls_factor:
         l_factor = (
@@ -560,8 +625,10 @@ def calculate_ls_factor(
         #length calculations ... cap of 333m"
         l_factor[l_factor > 333] = 333
 
-        #This is the ls_factor
-        return numpy.where(nodata_mask, ls_nodata, l_factor * slope_factor)
+        result = numpy.empty(aspect_angle.shape)
+        result[:] = ls_nodata
+        result[valid_mask] = l_factor * slope_factor
+        return result
 
     #Call vectorize datasets to calculate the ls_factor
     dataset_uri_list = [aspect_uri, slope_uri, flow_accumulation_uri]
@@ -576,12 +643,19 @@ def calculate_ls_factor(
     beta_uri = os.path.join(base_directory, "beta.tif")
     m_uri = os.path.join(base_directory, "m.tif")
 
+    def m_op(percent_slope, flow_accumulation):
+        """calculate m factor"""
 
-    def m_op(aspect_angle, percent_slope, flow_accumulation):
-        slope_in_radians = numpy.arctan(percent_slope / 100.0)
+        valid_mask = (
+            (percent_slope != slope_nodata) &
+            (flow_accumulation != flow_accumulation_nodata))
 
-        beta = ((numpy.sin(slope_in_radians) / 0.0896) /
-            (3 * numpy.sin(slope_in_radians)**0.8 + 0.56))
+        sin_slope_in_radians = numpy.sin(
+            numpy.arctan(percent_slope[valid_mask] / 100.0))
+
+        beta = (
+            (sin_slope_in_radians / 0.0896) /
+            (3 * sin_slope_in_radians**0.8 + 0.56))
 
         #slope table in percent
         slope_table = [1., 3.5, 5., 9.]
@@ -589,58 +663,76 @@ def calculate_ls_factor(
         #Look up the correct m value from the table
         m_exp = beta/(1+beta)
         for i in range(4):
-            m_exp[percent_slope <= slope_table[i]] = exponent_table[i]
+            m_exp[percent_slope[valid_mask] <= slope_table[i]] = (
+                exponent_table[i])
 
-        return m_exp
+        result = numpy.empty(percent_slope.shape)
+        result[:] = ls_nodata
+        result[valid_mask] = m_exp
+        return result
 
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list, m_op, m_uri, gdal.GDT_Float32,
+        [slope_uri, flow_accumulation_uri], m_op, m_uri, gdal.GDT_Float32,
         ls_nodata, cell_size, "intersection", dataset_to_align_index=0,
         vectorize_op=False)
 
-
-    def beta_op(aspect_angle, percent_slope, flow_accumulation):
-        slope_in_radians = numpy.arctan(percent_slope / 100.0)
-
-        #Set the m value to the lookup table that's Table 1 in
-        #InVEST Sediment Model_modifications_10-01-2012_RS.docx in the
-        #FT Team dropbox
-        return ((numpy.sin(slope_in_radians) / 0.0896) /
-            (3 * numpy.sin(slope_in_radians)**0.8 + 0.56))
+    def beta_op(percent_slope):
+        """calculate beta as a function of slope"""
+        valid_mask = percent_slope != slope_nodata
+        sin_slope_in_radians = numpy.sin(numpy.arctan(
+            percent_slope[valid_mask] / 100.0))
+        result = numpy.empty(percent_slope.shape)
+        result[:] = ls_nodata
+        result[valid_mask] = (
+            (sin_slope_in_radians / 0.0896) /
+            (3 * sin_slope_in_radians**0.8 + 0.56))
+        return result
 
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list, beta_op, beta_uri, gdal.GDT_Float32,
+        [slope_uri], beta_op, beta_uri,
+        gdal.GDT_Float32, ls_nodata, cell_size, "intersection",
+        dataset_to_align_index=0, vectorize_op=False)
+
+    def s_factor_op(percent_slope):
+        """calculate s factor from Equation 4 in "Extension and validation of
+            a geographic information system ..."""
+        valid_mask = percent_slope != slope_nodata
+        sin_slope_in_radians = numpy.sin(numpy.arctan(
+            percent_slope[valid_mask] / 100.0))
+        result = numpy.empty(percent_slope.shape)
+        result[:] = ls_nodata
+        result[valid_mask] = numpy.where(
+            percent_slope[valid_mask] < 9.0,
+            10.8 * sin_slope_in_radians + 0.03,
+            16.8 * sin_slope_in_radians - 0.5)
+        return result
+
+    pygeoprocessing.geoprocessing.vectorize_datasets(
+        [slope_uri], s_factor_op, s_factor_uri, gdal.GDT_Float32,
         ls_nodata, cell_size, "intersection", dataset_to_align_index=0,
         vectorize_op=False)
 
-    def s_factor_op(aspect_angle, percent_slope, flow_accumulation):
-        slope_in_radians = numpy.arctan(percent_slope / 100.0)
+    def xi_op(aspect_angle):
+        """calculate xi projection from aspect_angle"""
+        valid_mask = aspect_angle != aspect_nodata
+        result = numpy.empty(valid_mask.shape)
+        result[:] = ls_nodata
+        result[valid_mask] = (
+            numpy.abs(numpy.sin(aspect_angle[valid_mask])) +
+            numpy.abs(numpy.cos(aspect_angle[valid_mask])))
+        return result
 
-        #From Equation 4 in "Extension and validation of a geographic
-        #information system ..."
-        return numpy.where(percent_slope < 9.0,
-            10.8 * numpy.sin(slope_in_radians) + 0.03,
-            16.8 * numpy.sin(slope_in_radians) - 0.5)
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list, s_factor_op, s_factor_uri, gdal.GDT_Float32,
-        ls_nodata, cell_size, "intersection", dataset_to_align_index=0,
-        vectorize_op=False)
-
-    def xi_op(aspect_angle, percent_slope, flow_accumulation):
-        return (numpy.abs(numpy.sin(aspect_angle)) +
-            numpy.abs(numpy.cos(aspect_angle)))
-    pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list, xi_op, xi_uri, gdal.GDT_Float32,
+        [aspect_uri], xi_op, xi_uri, gdal.GDT_Float32,
         ls_nodata, cell_size, "intersection", dataset_to_align_index=0,
         vectorize_op=False)
 
 
 def calculate_rkls(
-    ls_factor_uri, erosivity_uri, erodibility_uri, stream_uri,
-    rkls_uri):
-
+        ls_factor_uri, erosivity_uri, erodibility_uri, stream_uri,
+        rkls_uri):
     """Calculates per-pixel potential soil loss using the RKLS (revised
-        universial soil loss equation with no C or P).
+        universal soil loss equation with no C or P).
 
         ls_factor_uri - GDAL uri with the LS factor pre-calculated
         erosivity_uri - GDAL uri with per pixel erosivity
@@ -661,7 +753,7 @@ def calculate_rkls(
     cell_size = pygeoprocessing.geoprocessing.get_cell_size_from_uri(ls_factor_uri)
     cell_area_ha = cell_size ** 2 / 10000.0
 
-    def rkls_function(ls_factor, erosivity, erodibility, stream):
+    def rkls_op(ls_factor, erosivity, erodibility, stream):
         """Calculates the USLE equation
 
         ls_factor - length/slope factor
@@ -674,23 +766,22 @@ def calculate_rkls(
             defined, nodata if some are not defined, 0 if in a stream
             (stream)"""
 
-        rkls = numpy.where(
-            stream == 1, 0.0,
-            ls_factor * erosivity * erodibility * cell_area_ha)
-        return numpy.where(
-            (ls_factor == ls_factor_nodata) | (erosivity == erosivity_nodata) |
-            (erodibility == erodibility_nodata) | (stream == stream_nodata),
-            usle_nodata, rkls)
-
-    dataset_uri_list = [
-        ls_factor_uri, erosivity_uri, erodibility_uri, stream_uri]
+        valid_mask = (
+            (ls_factor != ls_factor_nodata) & (erosivity != erosivity_nodata) &
+            (erodibility != erodibility_nodata) & (stream != stream_nodata))
+        result = numpy.empty(valid_mask.shape)
+        result[:] = usle_nodata
+        result[valid_mask] = (
+            (stream[valid_mask] != 1) * ls_factor[valid_mask] *
+            erosivity[valid_mask] * erodibility[valid_mask] * cell_area_ha)
+        return result
 
     #Aligning with index 3 that's the stream and the most likely to be
     #aligned with LULCs
     pygeoprocessing.geoprocessing.vectorize_datasets(
-        dataset_uri_list, rkls_function, rkls_uri, gdal.GDT_Float32,
-        usle_nodata, cell_size, "intersection", dataset_to_align_index=3,
-        vectorize_op=False)
+        [ls_factor_uri, erosivity_uri, erodibility_uri, stream_uri],
+        rkls_op, rkls_uri, gdal.GDT_Float32, usle_nodata, cell_size,
+        "intersection", dataset_to_align_index=3, vectorize_op=False)
 
 
 def _prepare(**args):
