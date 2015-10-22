@@ -325,7 +325,9 @@ def execute(args):
         """calculate log_10(d_up/d_dn)"""
         result = numpy.empty(d_up.shape)
         result[:] = ic_nodata
-        valid_mask = (d_up != d_up_nodata) & (d_dn != d_dn_nodata)
+        valid_mask = (
+            (d_up != d_up_nodata) & (d_dn != d_dn_nodata) & (d_dn != 0.0) &
+            (d_up != 0.0))
         result[valid_mask] = numpy.log10(d_up[valid_mask] / d_dn[valid_mask])
         return result
 
