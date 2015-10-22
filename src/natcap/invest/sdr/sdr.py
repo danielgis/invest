@@ -490,16 +490,18 @@ def execute(args):
     LOGGER.info('generating report')
     esri_driver = ogr.GetDriverByName('ESRI Shapefile')
 
+    usle_tot = (
+        pygeoprocessing.geoprocessing.aggregate_raster_values_uri(
+            usle_uri, args['watersheds_uri'], 'ws_id').total)
+    sed_export = (
+        pygeoprocessing.geoprocessing.aggregate_raster_values_uri(
+            sed_export_uri, args['watersheds_uri'], 'ws_id').total)
+    retention_tot = dict(
+        (ws_id, usle_tot[ws_id] - sed_export[ws_id]) for ws_id in sed_export)
     field_summaries = {
-        'usle_tot': pygeoprocessing.geoprocessing.aggregate_raster_values_uri(
-            usle_uri, args['watersheds_uri'], 'ws_id').total,
-        'sed_export': (
-            pygeoprocessing.geoprocessing.aggregate_raster_values_uri(
-                sed_export_uri, args['watersheds_uri'], 'ws_id').total),
-        'sed_retent': (
-            pygeoprocessing.geoprocessing.aggregate_raster_values_uri(
-                sed_retention_bare_soil_uri, args['watersheds_uri'],
-                'ws_id').total),
+        'usle_tot': usle_tot,
+        'sed_export': sed_export,
+        'sed_ret': retention_tot
         }
 
     original_datasource = ogr.Open(args['watersheds_uri'])
