@@ -604,7 +604,7 @@ class Executor(threading.Thread):
             self.setThreadFailed(True, exception)
             log_exit_thread = threading.Thread(
                 target=_log_exit_status, args=(
-                    session_id, str(traceback.format_exc())))
+                    session_id, traceback.format_exc()))
             log_exit_thread.start()
             return
 
@@ -665,11 +665,13 @@ def _calculate_args_bounding_box(args_dict):
         """Helper function to merge two bounding boxes through union or
             intersection
 
-            Args:
+            Parameters:
                 bb1 (list of float): bounding box of the form
                     [minx, maxy, maxx, miny] or None
                 bb2 (list of float): bounding box of the form
                     [minx, maxy, maxx, miny] or None
+                mode (string): either "union" or "intersection" indicating the
+                    how to combine the two bounding boxes.
 
             Returns:
                 either the intersection or union of bb1 and bb2 depending
@@ -681,17 +683,10 @@ def _calculate_args_bounding_box(args_dict):
         if bb2 is None:
             return bb1
 
-        less_than_or_equal = lambda x, y: x if x <= y else y
-        greater_than = lambda x, y: x if x > y else y
-
         if mode == "union":
-            comparison_ops = [
-                less_than_or_equal, greater_than, greater_than,
-                less_than_or_equal]
+            comparison_ops = [min, max, max, min]
         if mode == "intersection":
-            comparison_ops = [
-                greater_than, less_than_or_equal, less_than_or_equal,
-                greater_than]
+            comparison_ops = [max, min, min, max]
 
         bb_out = [op(x, y) for op, x, y in zip(comparison_ops, bb1, bb2)]
         return bb_out
@@ -706,7 +701,8 @@ def _calculate_args_bounding_box(args_dict):
                 gis types.  They can be any other type, including dictionaries.
             bb_intersection (list or None): if list, has the form
                 [xmin, ymin, xmax, ymax], where coordinates are in lng, lat
-            bb_union (list): same as bb_intersection
+            bb_union (list or None): if list, has the form
+                [xmin, ymin, xmax, ymax], where coordinates are in lng, lat
 
         Returns:
             (intersection, union) bounding box tuples of all filepaths to GIS

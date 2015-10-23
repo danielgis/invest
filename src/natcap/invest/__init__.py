@@ -3,9 +3,16 @@
 import os
 import sys
 import pkg_resources
+import logging
 
 import pygeoprocessing
 import natcap.versioner
+
+from natcap.invest.tests import test
+
+
+__all__ = ['is_release', 'local_dir', 'test', 'PYGEOPROCESSING_REQUIRED']
+
 
 # Verify that the installed pygeoprocessing meets the minimum requirements.
 # Pyinstaller binaries do not allow us to use pkg_resources.require(), as
@@ -14,7 +21,7 @@ import natcap.versioner
 # distutils.LooseVersion, since pkg_resources.parse_version is
 # PEP440-compliant and it's very likely that a dev version of pygeoprocessing
 # will be found.
-PYGEOPROCESSING_REQUIRED = '0.3.0a8'
+PYGEOPROCESSING_REQUIRED = '0.3.0a9'
 if (pkg_resources.parse_version(pygeoprocessing.__version__) <
         pkg_resources.parse_version(PYGEOPROCESSING_REQUIRED)):
     raise ValueError(('Pygeoprocessing >= {req_version} required, '
@@ -23,6 +30,9 @@ if (pkg_resources.parse_version(pygeoprocessing.__version__) <
                           found_ver=pygeoprocessing.__version__))
 
 __version__ = natcap.versioner.get_version('natcap.invest')
+
+logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
+%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 
 
 def is_release():
