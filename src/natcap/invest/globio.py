@@ -15,7 +15,12 @@ import pygeoprocessing
 logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 
-LOGGER = logging.getLogger('natcap.invest.globio.globio')
+LOGGER = logging.getLogger('natcap.invest.globio')
+
+# this value of sigma == 9.0 was derived by Justin Johnson as a good
+# approximation to use as a gaussian filter to replace the connectivity index.
+# I don't have any other documentation than his original code base.
+SIGMA = 9.0
 
 
 def execute(args):
@@ -50,10 +55,10 @@ def execute(args):
                 to which it should be converted, using intermediate codes
                 described in the example below.
 
-        args['infrastructure_dir'] (string): used in "mode (a)" a path to a
-            folder containing maps of any forms of infrastructure to
-            consider in the calculation of MSA. These data may be in either
-            raster or vector format.
+        args['infrastructure_dir'] (string): used in "mode (a) and (b)" a path
+            to a folder containing maps of either gdal compatible rasters or
+            OGR compatible shapefiles.  These data will be used in the
+            infrastructure to calculation of MSA.
         args['pasture_uri'] (string): used in "mode (a)" path to pasture raster
         args['potential_vegetation_uri'] (string): used in "mode (a)" path to
             potential vegetation raster
@@ -94,84 +99,22 @@ def execute(args):
         out_pixel_size = pygeoprocessing.geoprocessing.get_cell_size_from_uri(
             args['lulc_uri'])
         globio_lulc_uri = _calculate_globio_lulc_map(
-            args, file_suffix, intermediate_dir, tmp_dir, out_pixel_size)
+            args['lulc_to_globio_table_uri'], args['lulc_uri'],
+            args['potential_vegetation_uri'], args['pasture_uri'],
+            float(args['pasture_threshold']), float(args['primary_threshold']),
+            file_suffix, intermediate_dir, tmp_dir, out_pixel_size)
     else:
         out_pixel_size = pygeoprocessing.geoprocessing.get_cell_size_from_uri(
             args['globio_lulc_uri'])
-        LOGGER.info('no need to calcualte GLOBIO LULC because it is passed in')
+        LOGGER.info('no need to calculate GLOBIO LULC because it is passed in')
         globio_lulc_uri = args['globio_lulc_uri']
 
     globio_nodata = pygeoprocessing.get_nodata_from_uri(globio_lulc_uri)
 
-    #load the infrastructure layers from disk
-    infrastructure_filenames = []
-    infrastructure_nodata_list = []
-    for root_directory, _, filename_list in os.walk(
-            args['infrastructure_dir']):
-
-        for filename in filename_list:
-            if filename.lower().endswith(".tif"):
-                infrastructure_filenames.append(
-                    os.path.join(root_directory, filename))
-                infrastructure_nodata_list.append(
-                    pygeoprocessing.geoprocessing.get_nodata_from_uri(
-                        infrastructure_filenames[-1]))
-            if filename.lower().endswith(".shp"):
-                infrastructure_tmp_raster = (
-                    pygeoprocessing.temporary_filename())
-                pygeoprocessing.geoprocessing.new_raster_from_base_uri(
-                    globio_lulc_uri, infrastructure_tmp_raster,
-                    'GTiff', -1.0, gdal.GDT_Int32, fill_value=0)
-                pygeoprocessing.geoprocessing.rasterize_layer_uri(
-                    infrastructure_tmp_raster,
-                    os.path.join(root_directory, filename), burn_values=[1],
-                    option_list=["ALL_TOUCHED=TRUE"])
-                infrastructure_filenames.append(infrastructure_tmp_raster)
-                infrastructure_nodata_list.append(
-                    pygeoprocessing.geoprocessing.get_nodata_from_uri(
-                        infrastructure_filenames[-1]))
-
-    if len(infrastructure_filenames) == 0:
-        raise ValueError(
-            "infrastructure directory didn't have any GeoTIFFS or "
-            "Shapefiles at %s", args['infrastructure_dir'])
-
-    infrastructure_nodata = -1
     infrastructure_uri = os.path.join(
         intermediate_dir, 'combined_infrastructure%s.tif' % file_suffix)
-
-    def _collapse_infrastructure_op(*infrastructure_array_list):
-        """Combines all input infrastructure into a single map where if any
-            pixel on the stack is 1 gets passed through, any nodata pixel
-            masks out all of them"""
-        nodata_mask = (
-            infrastructure_array_list[0] == infrastructure_nodata_list[0])
-        infrastructure_result = infrastructure_array_list[0] > 0
-        for index in range(1, len(infrastructure_array_list)):
-            current_nodata = (
-                infrastructure_array_list[index] ==
-                infrastructure_nodata_list[index])
-
-            infrastructure_result = (
-                infrastructure_result |
-                ((infrastructure_array_list[index] > 0) & ~current_nodata))
-
-            nodata_mask = (
-                nodata_mask & current_nodata)
-
-        return numpy.where(
-            nodata_mask, infrastructure_nodata, infrastructure_result)
-
-    LOGGER.info('collapse infrastructure into one raster')
-    pygeoprocessing.geoprocessing.vectorize_datasets(
-        infrastructure_filenames, _collapse_infrastructure_op,
-        infrastructure_uri, gdal.GDT_Byte, infrastructure_nodata,
-        out_pixel_size, "intersection", dataset_to_align_index=0,
-        assert_datasets_projected=False, vectorize_op=False)
-
-    # clean up the temporary filenames
-    for filename in infrastructure_filenames:
-        os.remove(filename)
+    _collapse_infrastructure_layers(
+        args['infrastructure_dir'], globio_lulc_uri, infrastructure_uri)
 
     #calc_msa_f
     primary_veg_mask_uri = os.path.join(
@@ -181,6 +124,7 @@ def execute(args):
     def _primary_veg_mask_op(lulc_array):
         """masking out natural areas"""
         nodata_mask = lulc_array == globio_nodata
+        # landcover type 1 in the GLOBIO schema represents primary vegetation
         result = (lulc_array == 1)
         return numpy.where(nodata_mask, primary_veg_mask_nodata, result)
 
@@ -192,10 +136,9 @@ def execute(args):
         assert_datasets_projected=False, vectorize_op=False)
 
     LOGGER.info('gaussian filter primary veg')
-    sigma = 9.0
     gaussian_kernel_uri = os.path.join(
         tmp_dir, 'gaussian_kernel%s.tif' % file_suffix)
-    make_gaussian_kernel_uri(sigma, gaussian_kernel_uri)
+    make_gaussian_kernel_uri(SIGMA, gaussian_kernel_uri)
     smoothed_primary_veg_mask_uri = os.path.join(
         tmp_dir, 'smoothed_primary_veg_mask%s.tif' % file_suffix)
     pygeoprocessing.geoprocessing.convolve_2d_uri(
@@ -227,7 +170,7 @@ def execute(args):
     msa_f_values = sorted(msa_f_table)
 
     def _msa_f_op(primary_veg_smooth):
-        """calcualte msa fragmentation"""
+        """calculate msa fragmentation"""
         nodata_mask = primary_veg_mask_nodata == primary_veg_smooth
 
         msa_f = numpy.empty(primary_veg_smooth.shape)
@@ -492,23 +435,48 @@ def load_msa_parameter_table(
 
 
 def _calculate_globio_lulc_map(
-        args, file_suffix, intermediate_dir, tmp_dir, out_pixel_size):
+        lulc_to_globio_table_uri, lulc_uri, potential_vegetation_uri,
+        pasture_uri, pasture_threshold, primary_threshold, file_suffix,
+        intermediate_dir, tmp_dir, out_pixel_size):
     """Used to translate a general landcover map into a GLOBIO version.
-        to simplify globio function since it's possible to skip this calculation
-        if a predefined globio map has been created.
+    to simplify globio function since it's possible to skip this calculation
+    if a predefined globio map has been created.
 
-        args - (dict) the argument dictionary passed in by the 'execute' entry
-            point
+    Parameters:
+        lulc_to_globio_table_uri (string): a table that maps arbitrary
+            landcover values to globio equivalents.
+        lulc_uri (string): path to the raw landcover map.
+        potential_vegetation_uri (string): a landcover map that indicates what
+            the vegetation types would be if left to revert to natural state
+        pasture_uri (string): a path to a raster that indicates the percent
+            of pasture contained in the pixel.  used to classify forest types
+            from scrubland.
+        pasture_threshold (float): the threshold to classify pixels in pasture
+            as potential forest or scrub
+        primary_threshold (float): the threshold to classify the calculated
+            FFQI pixels into core forest or secondary
         file_suffix - (string) to append on output file
-        intermediate_dir - (string) path to location for temporary files
+        intermediate_dir - (string) path to location for temporary files of
+            which the following files are created
+                'intermediate_globio_lulc.tif': reclassified landcover map to
+                    globio landcover codes
+                'ffqi.tif': index of fragmentation due to infrastructure and
+                    original values of landscape
+                'globio_lulc.tif': primary output of the function, starts
+                    with intermeidate globio and modifies based on the other
+                    biophysical parameters to the function as described in the
+                    GLOBIO process
+
         tmp_dir - (string) path to location for temporary files
         out_pixel_size - (float) pixel size of output globio map
 
-        returns a (string) filename to the generated globio map"""
+    Returns:
+        a (string) filename to the generated globio GeoTIFF map
+    """
 
      #reclassify the landcover map
     lulc_to_globio_table = pygeoprocessing.get_lookup_from_table(
-        args['lulc_to_globio_table_uri'], 'lucode')
+        lulc_to_globio_table_uri, 'lucode')
 
     lulc_to_globio = dict(
         [(lulc_code, int(table['globio_lucode'])) for
@@ -518,14 +486,11 @@ def _calculate_globio_lulc_map(
         intermediate_dir, 'intermediate_globio_lulc%s.tif' % file_suffix)
     globio_nodata = -1
     pygeoprocessing.geoprocessing.reclassify_dataset_uri(
-        args['lulc_uri'], lulc_to_globio, intermediate_globio_lulc_uri,
+        lulc_uri, lulc_to_globio, intermediate_globio_lulc_uri,
         gdal.GDT_Int32, globio_nodata, exception_flag='values_required')
 
     globio_lulc_uri = os.path.join(
         intermediate_dir, 'globio_lulc%s.tif' % file_suffix)
-
-    potential_vegetation_uri = args['potential_vegetation_uri']
-    pasture_uri = args['pasture_uri']
 
     #smoothed natural areas are natural areas run through a gaussian filter
     forest_areas_uri = os.path.join(
@@ -535,6 +500,8 @@ def _calculate_globio_lulc_map(
     def _forest_area_mask_op(lulc_array):
         """masking out forest areas"""
         nodata_mask = lulc_array == globio_nodata
+        # landcover code 130 represents all MODIS forest codes which originate
+        # as 1-5
         result = (lulc_array == 130)
         return numpy.where(nodata_mask, forest_areas_nodata, result)
 
@@ -546,10 +513,9 @@ def _calculate_globio_lulc_map(
         assert_datasets_projected=False, vectorize_op=False)
 
     LOGGER.info('gaussian filter natural areas')
-    sigma = 9.0
     gaussian_kernel_uri = os.path.join(
         tmp_dir, 'gaussian_kernel%s.tif' % file_suffix)
-    make_gaussian_kernel_uri(sigma, gaussian_kernel_uri)
+    make_gaussian_kernel_uri(SIGMA, gaussian_kernel_uri)
     smoothed_forest_areas_uri = os.path.join(
         tmp_dir, 'smoothed_forest_areas%s.tif' % file_suffix)
     pygeoprocessing.geoprocessing.convolve_2d_uri(
@@ -574,9 +540,6 @@ def _calculate_globio_lulc_map(
 
     #remap globio lulc to an internal lulc based on ag and intensification
     #proportion these came from the 'expansion_scenarios.py'
-    pasture_threshold = float(args['pasture_threshold'])
-    primary_threshold = float(args['primary_threshold'])
-
     def _create_globio_lulc(
             lulc_array, potential_vegetation_array, pasture_array,
             ffqi):
@@ -588,12 +551,16 @@ def _calculate_globio_lulc_map(
 
         # Step 1.2c: Classify all ag classes as a new LULC value "12" per our
         # custom design of agriculture
+        # landcover 132 represents agriculture landcover types in the GLOBIO
+        # classification scheme
         lulc_ag_split = numpy.where(
-            lulc_array == 132.0, 12, lulc_array)
+            lulc_array == 132, 12, lulc_array)
         nodata_mask = nodata_mask | (lulc_array == globio_nodata)
 
-        #Step 1.3a: Split Scrublands and grasslands into pristine
-        #vegetations, livestock grazing areas, and man-made pastures.
+        # Step 1.3a: Split Scrublands and grasslands into pristine
+        # vegetations, livestock grazing areas, and man-made pastures.
+        # landcover 131 represents grassland/shrubland in the GLOBIO
+        # classification
         three_types_of_scrubland = numpy.where(
             (potential_vegetation_array <= 8) & (lulc_ag_split == 131), 6.0,
             5.0)
@@ -603,18 +570,22 @@ def _calculate_globio_lulc_map(
             (pasture_array < pasture_threshold), 1.0,
             three_types_of_scrubland)
 
-        #Step 1.3b: Stamp ag_split classes onto input LULC
+        # Step 1.3b: Stamp ag_split classes onto input LULC
+        # landcover 131 represents grassland/shrubland in the GLOBIO
+        # classification
         broad_lulc_shrub_split = numpy.where(
             lulc_ag_split == 131, three_types_of_scrubland, lulc_ag_split)
 
-        #Step 1.4a: Split Forests into Primary, Secondary
+        # Step 1.4a: Split Forests into Primary, Secondary
         four_types_of_forest = numpy.empty(lulc_array.shape)
-        #1.0 is primary forest
+        # 1 is primary forest
         four_types_of_forest[(ffqi >= primary_threshold)] = 1
-        #3 is secondary forest
+        # 3 is secondary forest
         four_types_of_forest[(ffqi < primary_threshold)] = 3
 
-        #Step 1.4b: Stamp ag_split classes onto input LULC
+        # Step 1.4b: Stamp ag_split classes onto input LULC
+        # landcover code 130 represents all MODIS forest codes which originate
+        # as 1-5
         globio_lulc = numpy.where(
             broad_lulc_shrub_split == 130, four_types_of_forest,
             broad_lulc_shrub_split)  # stamp primary vegetation
@@ -630,3 +601,95 @@ def _calculate_globio_lulc_map(
         vectorize_op=False)
 
     return globio_lulc_uri
+
+
+def _collapse_infrastructure_layers(
+        infrastructure_dir, base_raster_uri, infrastructure_uri):
+    """Gathers all the GIS layers in the given directory and collapses them
+    to a single byte raster mask where 1 indicates a pixel overlapping with
+    one of the original infrastructure layers, 0 does not, and nodata
+    indicates a region that has no layers that overlap but are still contained
+    in the bounding box.
+
+    Parameters:
+        infrastructure_dir (string): path to a directory containing maps of
+            either gdal compatible rasters or OGR compatible shapefiles.
+        base_raster_uri (string): a path to a file that has the dimensions and
+            projection of the desired output infrastructure file.
+        infrastructure_uri (string): (output) path to a file that will be a
+            byte raster with 1s everywhere there was a GIS layer present in
+            the GIS layers in `infrastructure_dir`.
+
+    Returns:
+        None
+    """
+    #load the infrastructure layers from disk
+    infrastructure_filenames = []
+    infrastructure_nodata_list = []
+    infrastructure_tmp_filenames = []
+    for root_directory, _, filename_list in os.walk(infrastructure_dir):
+
+        for filename in filename_list:
+            if filename.lower().endswith(".tif"):
+                infrastructure_filenames.append(
+                    os.path.join(root_directory, filename))
+                infrastructure_nodata_list.append(
+                    pygeoprocessing.geoprocessing.get_nodata_from_uri(
+                        infrastructure_filenames[-1]))
+            if filename.lower().endswith(".shp"):
+                infrastructure_tmp_raster = (
+                    pygeoprocessing.temporary_filename())
+                pygeoprocessing.geoprocessing.new_raster_from_base_uri(
+                    base_raster_uri, infrastructure_tmp_raster,
+                    'GTiff', -1.0, gdal.GDT_Int32, fill_value=0)
+                pygeoprocessing.geoprocessing.rasterize_layer_uri(
+                    infrastructure_tmp_raster,
+                    os.path.join(root_directory, filename), burn_values=[1],
+                    option_list=["ALL_TOUCHED=TRUE"])
+                infrastructure_filenames.append(infrastructure_tmp_raster)
+                infrastructure_tmp_filenames.append(infrastructure_tmp_raster)
+                infrastructure_nodata_list.append(
+                    pygeoprocessing.geoprocessing.get_nodata_from_uri(
+                        infrastructure_filenames[-1]))
+
+    if len(infrastructure_filenames) == 0:
+        raise ValueError(
+            "infrastructure directory didn't have any GeoTIFFS or "
+            "Shapefiles at %s", infrastructure_dir)
+
+    infrastructure_nodata = -1
+
+    def _collapse_infrastructure_op(*infrastructure_array_list):
+        """Combines all input infrastructure into a single map where if any
+            pixel on the stack is 1 gets passed through, any nodata pixel
+            masks out all of them"""
+        nodata_mask = (
+            infrastructure_array_list[0] == infrastructure_nodata_list[0])
+        infrastructure_result = infrastructure_array_list[0] > 0
+        for index in range(1, len(infrastructure_array_list)):
+            current_nodata = (
+                infrastructure_array_list[index] ==
+                infrastructure_nodata_list[index])
+
+            infrastructure_result = (
+                infrastructure_result |
+                ((infrastructure_array_list[index] > 0) & ~current_nodata))
+
+            nodata_mask = (
+                nodata_mask & current_nodata)
+
+        return numpy.where(
+            nodata_mask, infrastructure_nodata, infrastructure_result)
+
+    LOGGER.info('collapse infrastructure into one raster')
+    out_pixel_size = pygeoprocessing.geoprocessing.get_cell_size_from_uri(
+        base_raster_uri)
+    pygeoprocessing.geoprocessing.vectorize_datasets(
+        infrastructure_filenames, _collapse_infrastructure_op,
+        infrastructure_uri, gdal.GDT_Byte, infrastructure_nodata,
+        out_pixel_size, "intersection", dataset_to_align_index=0,
+        assert_datasets_projected=False, vectorize_op=False)
+
+    # clean up the temporary filenames
+    for filename in infrastructure_tmp_filenames:
+        os.remove(filename)
