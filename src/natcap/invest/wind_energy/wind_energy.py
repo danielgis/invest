@@ -208,14 +208,10 @@ def execute(args):
                 'Please make sure the Hub Height is between the ranges of 10 '
                 'and 150 meters and is a multiple of 10. ex: 10,20,...70,80...')
 
+
     # The scale_key is used in getting the right wind energy arguments that are
-    # dependent on the hub height. The scale_key has a specific signature and we
-    # need to build up that signature from the hub_height given by the user
-    scale_key = str(hub_height)
-    if len(scale_key) <= 2:
-        scale_key = 'Ram-0' + scale_key + 'm'
-    else:
-        scale_key = 'Ram-' + scale_key + 'm'
+    # dependent on the hub height.
+    scale_key = format_scale_key(hub_height)
 
     LOGGER.debug('hub_height : %s', hub_height)
     LOGGER.debug('SCALE_key : %s', scale_key)
@@ -670,9 +666,6 @@ def execute(args):
     farm_poly_uri = os.path.join(out_dir,
         'example_size_and_orientation_of_a_possible_wind_farm%s.shp' % suffix)
 
-    if os.path.isfile(farm_poly_uri):
-        os.remove(farm_poly_uri)
-
     # Create the actual polygon
     LOGGER.info('Creating Example Farm Polygon')
     create_wind_farm_box(spat_ref, start_point, width, length, farm_poly_uri)
@@ -760,9 +753,6 @@ def execute(args):
             land_exists = True
         else:
             land_exists = False
-
-        LOGGER.debug('Grid_Points_Dict : %s', grid_dict)
-        LOGGER.debug('Land_Points_Dict : %s', land_dict)
 
         grid_ds_uri = os.path.join(inter_dir, 'val_grid_points%s.shp' % suffix)
 
@@ -1142,78 +1132,6 @@ def execute(args):
                 vectorize_op=False)
     LOGGER.info('Wind Energy Valuation Model Complete')
 
-def get_shapefile_feature_count(shape_uri):
-    """Get the feature count for a shapefile
-
-        shape_uri - a URI to an OGR datasource
-
-        returns - the feature count"""
-    shape_ds = ogr.Open(shape_uri)
-    layer = shape_ds.GetLayer()
-    feat_count = layer.GetFeatureCount()
-    return feat_count
-
-def get_dictionary_from_shape(shape_uri):
-    """This function takes a shapefile URI and for each feature retrieves
-        the X and Y value from it's geometry. The X and Y value are stored in
-        a numpy array as a point [x_location,y_location], which is returned
-        when all the features have been iterated through.
-
-        shape_uri - a URI to an OGR shapefile datasource
-
-        returns - A numpy array of points, which represent the shape's feature's
-              geometries.
-    """
-    shape = ogr.Open(shape_uri)
-    layer = shape.GetLayer()
-    # Dictionary to store the X,Y (lat,long) location and fields / values
-    feat_dict = {}
-
-    for feat in layer:
-        geom = feat.GetGeometryRef()
-        x_location = geom.GetX()
-        y_location = geom.GetY()
-        # Set the key as the X,Y / Lat, Long as a tuple
-        feat_dict[(x_location, y_location)] = {}
-        for field_index in range(feat.GetFieldCount()):
-            field_defn = feat.GetFieldDefnRef(field_index)
-            field_name = field_defn.GetNameRef()
-            feat_dict[(x_location, y_location)][field_name] = feat.GetField(
-                    field_index)
-
-    shape = None
-    return feat_dict
-
-def get_points_geometries(shape_uri):
-    """This function takes a shapefile URI and for each feature retrieves
-        the X and Y value from it's geometry. The X and Y value are stored in
-        a numpy array as a point [x_location,y_location], which is returned
-        when all the features have been iterated through.
-
-        shape_uri - A URI to an OGR shapefile datasource
-
-        returns - A numpy array of points, which represent the shape's feature's
-              geometries.
-    """
-    shape = ogr.Open(shape_uri)
-    layer = shape.GetLayer()
-    # Get the number of features or points in the shapefile
-    feat_count = layer.GetFeatureCount()
-    # Create a 2D numpy array of zeros with length of feature count
-    points = np.zeros((feat_count, 2))
-    # Initiate an index to use to iterate through the numpy array
-    index = 0
-
-    for feat in layer:
-        geom = feat.GetGeometryRef()
-        x_location = geom.GetX()
-        y_location = geom.GetY()
-        points[index] = [x_location, y_location]
-        index = index + 1
-
-    shape = None
-    return np.array(points)
-
 def add_field_to_shape_given_list(shape_ds_uri, value_list, field_name):
     """Adds a field and a value to a given shapefile from a list of values. The
         list of values must be the same size as the number of features in the
@@ -1381,6 +1299,9 @@ def create_wind_farm_box(spat_ref, start_point, x_len, y_len, out_uri):
 
         return - nothing"""
     LOGGER.debug('Entering create_wind_farm_box')
+
+    if os.path.isfile(out_uri):
+        os.remove(out_uri)
 
     driver = ogr.GetDriverByName('ESRI Shapefile')
     datasource = driver.CreateDataSource(out_uri)
@@ -2065,3 +1986,23 @@ def pixel_size_based_on_coordinate_transform_uri(
     gdal.Dataset.__swig_destroy__(dataset)
     dataset = None
     return (pixel_diff_x, pixel_diff_y)
+
+def format_scale_key(hub_height):
+    """Constructs a string based on the hub height.
+
+    The scale_key has a specific signature that is created from the hub
+        height. The scale_key is used to lookup certain wind parameters.
+
+    Parameters:
+        hub_height (int): the hub height for the wind turbines
+
+    Returns:
+        a String representing the scale key
+    """
+    scale_key = str(hub_height)
+    if len(scale_key) <= 2:
+        scale_key = 'Ram-0' + scale_key + 'm'
+    else:
+        scale_key = 'Ram-' + scale_key + 'm'
+
+    return scale_key
