@@ -1,0 +1,172 @@
+{
+  "id": "window",
+  "label": "Recreation Model",
+  "targetScript": "natcap.invest.recreation.recmodel_client",
+  "modelName": "recreation",
+  "localDocURI": "../documentation/recreation.html",
+  "height": 650,
+  "width": 600,
+  "elements": [
+    {
+      "id": "workspace_list",
+      "type": "list",
+      "elements": [
+        {
+            "id": "internet_warning",
+            "type": "label",
+            "label": "Note, this computer must have an Internet connection in order to run this model."
+        },
+        {
+          "id": "workspace_dir",
+          "args_id": "workspace_dir",
+          "type": "folder",
+          "label": "Workspace",
+          "defaultValue": "~/Documents/recreation_workspace",
+          "required": true,
+          "helpText": "The selected folder is used as the workspace where all intermediate and output files will be written.<br><br>If the selected folder does not exist, it will be created.<br><br><b>If datasets already exist in the selected folder, they will be overwritten.</b>"
+        },
+        {
+          "id": "results_suffix",
+          "args_id": "results_suffix",
+          "type": "text",
+          "dataType": "string",
+          "label": "Results Suffix (Optional)",
+          "defaultValue": "",
+          "required": false
+        },
+        {
+          "id": "aoi_path",
+          "args_id": "aoi_path",
+          "type": "file",
+          "label": "Area of Interest (Vector)",
+          "defaultValue": "../Recreation/input/initial/BC_AOI.shp",
+          "validateAs": {
+            "type": "OGR"
+          },
+          "required": true,
+          "helpText": "An OGR-supported vector file representing the area of interest where the model will run the analysis."
+        },
+        {
+          "id": "start_date",
+          "args_id": "start_date",
+          "type": "text",
+          "label": "Start Date (inclusive)",
+          "defaultValue": "2005-01-01",
+          "required": true
+        },
+        {
+          "id": "end_date",
+          "args_id": "end_date",
+          "type": "text",
+          "label": "End Date (inclusive)",
+          "defaultValue": "2007-12-31",
+          "required": true
+        },
+        {
+          "id": "aggregating_metric",
+          "args_id": "aggregating_metric",
+          "type": "dropdown",
+          "label": "Temporal aggregate metric",
+          "options": [
+            "daily",
+            "monthly",
+            "yearly"
+          ],
+          "returns": {
+            "mapValues": {
+              "daily": "daily",
+              "monthly": "monthly",
+              "yearly": "yearly"
+            }
+          },
+          "defaultValue": "all",
+          "required": true,
+          "helpText": "This is the temporal metric that is used to average a photo user across time.  If 'daily', points will be distinct per day, if 'yearly', the same point by the same user on different days, but the same year, will count as a single point."
+        }
+      ]
+    },
+    {
+      "id": "regression_container",
+      "type": "container",
+      "collapsible": true,
+      "args_id": "compute_regression",
+      "label": "Compute Regression",
+      "elements": [
+        {
+          "id": "regression_element_list",
+          "type": "list",
+          "elements": [
+            {
+              "id": "predictor_table_path",
+              "args_id": "predictor_table_path",
+              "type": "file",
+              "label": "Predictor Table",
+              "defaultValue": "../Recreation/input/initial/predictors.csv",
+              "validateAs": {
+                "type": "CSV"
+              },
+              "required": true,
+              "helpText": "A table that maps predictor IDs to files and their types with required headers of 'id', 'path', and 'type'.  The file paths can be absolute, or relative to the table."
+            },
+            {
+              "id": "scenario_predictor_table_path",
+              "args_id": "scenario_predictor_table_path",
+              "type": "file",
+              "label": "Scenario Predictor Table (optional)",
+              "defaultValue": "../Recreation/input/initial/scenario_predictors.csv",
+              "validateAs": {
+                "type": "CSV"
+              },
+              "required": false,
+              "helpText": "A table that maps predictor IDs to files and their types with required headers of 'id', 'path', and 'type'.  The file paths can be absolute, or relative to the table."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "grid_container",
+      "type": "container",
+      "collapsible": true,
+      "args_id": "grid_aoi",
+      "label": "Grid the AOI",
+      "elements": [
+        {
+          "id": "grid_element_list",
+          "type": "list",
+          "elements": [
+            {
+              "id": "grid_type",
+              "args_id": "grid_type",
+              "type": "dropdown",
+              "label": "Grid Type",
+              "options": [
+                "square",
+                "hexagon"
+              ],
+              "returns": {
+                "mapValues": {
+                  "square": "square",
+                  "hexagon": "hexagon"
+                }
+              },
+              "defaultValue": "square",
+              "required": true
+            },
+            {
+              "id": "cell_size",
+              "args_id": "cell_size",
+              "type": "text",
+              "label": "Cell Size",
+              "validText": "[0-9]+(\\.[0-9][0-9])?",
+              "dataType": "float",
+              "required": true,
+              "defaultValue": "5000",
+              "helpText": "The size of the grid units measured in the projection units of the AOI. For example, UTM projections use meters."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
