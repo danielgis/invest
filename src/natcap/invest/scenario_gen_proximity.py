@@ -307,7 +307,7 @@ def _log_stats(stats_cache, pixel_area, stats_uri):
                 lucode, stats_cache[lucode] * pixel_area, stats_cache[lucode]])
 
 
-def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**25):
+def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
     """Sorts the non-nodata pixels in the dataset on disk and returns
     an iterable in sorted order.
 
@@ -389,6 +389,11 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**25):
         score_file.close()
         index_file_name = index_file.name
         index_file.close()
+
+        sort_index = None
+        score_cache = None
+        index_cache = None
+
 
         def _remove_file(path):
             """Function to remove a file and handle exceptions to
