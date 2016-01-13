@@ -21,7 +21,7 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 
 LOGGER = logging.getLogger(
     'natcap.invest.scenario_generator_proximity_based')
-
+WRITE_BLOCK_SIZE = 10000  # number of elements to pass to struct.pack
 
 def execute(args):
     """Main entry point for proximity based scenario generator model.
@@ -104,7 +104,9 @@ def execute(args):
     for scenario_enabled, basename, score_weight in scenarios:
         if not scenario_enabled:
             continue
-        LOGGER.info('executing %s scenario', basename)
+        LOGGER.info(
+            'executing %s scenario on %s', basename,
+            os.path.basename(base_lulc_uri))
         output_landscape_raster_uri = os.path.join(
             output_dir, basename+file_suffix+'.tif')
         stats_uri = os.path.join(
@@ -116,6 +118,14 @@ def execute(args):
             focal_landcover_codes, convertible_type_list, score_weight,
             int(args['n_fragmentation_steps']), distance_from_edge_uri,
             output_landscape_raster_uri, stats_uri)
+
+    # attempt to clean up temporary directory
+    def _onerror_handler(function, path, excinfo):
+        """Handle errors raised by rmtree"""
+        LOGGER.error(
+            "Error when invoking %s on %s: %s", str(function), path, excinfo)
+        pass
+    shutils.rmtree(tmp_dir, onerror=_onerror_handler)
 
 
 def _convert_landscape(
@@ -371,8 +381,6 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
         Returns:
             Iterable to visit scores/indexes in increasing score order.
         """
-        LOGGER.debug(
-            '_sort_cache_to_iterator score_cache.size: %d', score_cache.size)
         # sort the whole bunch to disk
         sort_index = score_cache.argsort()
         score_cache = score_cache[sort_index]
@@ -381,16 +389,15 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
         #Dump all the scores and indexes to disk
         score_file = tempfile.NamedTemporaryFile(delete=False)
         index_file = tempfile.NamedTemporaryFile(delete=False)
-        write_block_size = 10000  # arbitrary size to write in chunks
-        for write_index in xrange(0, score_cache.size, write_block_size):
+        for write_index in xrange(0, score_cache.size, WRITE_BLOCK_SIZE):
             score_file.write(struct.pack(
                 '%sf' %
-                score_cache[write_index:write_index+write_block_size].size,
-                *(score_cache[write_index:write_index+write_block_size])))
+                score_cache[write_index:write_index+WRITE_BLOCK_SIZE].size,
+                *(score_cache[write_index:write_index+WRITE_BLOCK_SIZE])))
             index_file.write(struct.pack(
                 '%si' %
-                index_cache[write_index:write_index+write_block_size].size,
-                *(index_cache[write_index:write_index+write_block_size])))
+                index_cache[write_index:write_index+WRITE_BLOCK_SIZE].size,
+                *(index_cache[write_index:write_index+WRITE_BLOCK_SIZE])))
 
         #Get the filename and register a command to delete it after the
         #interpreter exits
