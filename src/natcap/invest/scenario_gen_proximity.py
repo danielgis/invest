@@ -1,9 +1,7 @@
-"""Scenario Generation: Proximity Based"""
+"""Scenario Generation: Proximity Based."""
 
 import os
-import math
 import logging
-import numpy
 import tempfile
 import struct
 import heapq
@@ -12,6 +10,7 @@ import atexit
 import collections
 import csv
 
+import numpy
 from osgeo import osr
 from osgeo import gdal
 import pygeoprocessing
@@ -325,7 +324,7 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
         decreasing sorted order by value * score_weight"""
 
     def _read_score_index_from_disk(
-            score_file_name, index_file_name, buffer_size=4*10000):
+            score_file_name, index_file_name, buffer_size=4*1000):
         """Generator to yield a float/int value from the given filenames.
         reads a buffer of `buffer_size` big before to avoid keeping the
         file open between generations."""
@@ -362,7 +361,7 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
                    struct.unpack('i', packed_index)[0])
 
     def _sort_cache_to_iterator(index_cache, score_cache):
-        """Flushes the current cache to a heap and returns it
+        """Flushes the current cache to a heap and returns it.
 
         Parameters:
             index_cache (1d numpy.array): contains flat indexes to the
@@ -370,8 +369,10 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
             score_cache (1d numpy.array): contains score pixels
 
         Returns:
-            Iterable to visit scores/indexes in increasing score order."""
-
+            Iterable to visit scores/indexes in increasing score order.
+        """
+        LOGGER.debug(
+            '_sort_cache_to_iterator score_cache.size: %d', score_cache.size)
         # sort the whole bunch to disk
         sort_index = score_cache.argsort()
         score_cache = score_cache[sort_index]
@@ -379,9 +380,17 @@ def _sort_to_disk(dataset_uri, score_weight=1.0, cache_element_size=2**20):
 
         #Dump all the scores and indexes to disk
         score_file = tempfile.NamedTemporaryFile(delete=False)
-        score_file.write(struct.pack('%sf' % score_cache.size, *score_cache))
         index_file = tempfile.NamedTemporaryFile(delete=False)
-        index_file.write(struct.pack('%si' % index_cache.size, *index_cache))
+        write_block_size = 10000  # arbitrary size to write in chunks
+        for write_index in xrange(0, score_cache.size, write_block_size):
+            score_file.write(struct.pack(
+                '%sf' %
+                score_cache[write_index:write_index+write_block_size].size,
+                *(score_cache[write_index:write_index+write_block_size])))
+            index_file.write(struct.pack(
+                '%si' %
+                index_cache[write_index:write_index+write_block_size].size,
+                *(index_cache[write_index:write_index+write_block_size])))
 
         #Get the filename and register a command to delete it after the
         #interpreter exits
@@ -571,7 +580,8 @@ def _convert_by_score(
     dirty_blocks = set()
 
     last_time = time.time()
-    for _, flatindex in _sort_to_disk(score_uri, score_weight=score_weight):
+    score_heap = _sort_to_disk(score_uri, score_weight=score_weight)
+    for _, flatindex in score_heap:
         if pixels_converted >= max_pixels_to_convert:
             break
         col_index = flatindex % n_cols
@@ -601,6 +611,7 @@ def _convert_by_score(
             dirty_blocks = set()
             next_index = 0
 
+    del score_heap
     # flush any remaining cache
     _flush_cache_to_band(
         data_array, row_array, col_array, next_index, dirty_blocks, out_band,
