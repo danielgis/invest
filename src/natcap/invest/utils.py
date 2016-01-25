@@ -1,4 +1,4 @@
-"""InVEST specific code utils"""
+"""InVEST specific code utils."""
 import math
 
 import numpy
@@ -8,8 +8,10 @@ import pygeoprocessing
 
 
 def make_suffix_string(args, suffix_key):
-    """Make an InVEST appropriate suffix string given the args dictionary and
-    suffix key.  In general, prepends an '_' when necessary and generates an
+    """Make an InVEST appropriate suffix string.
+
+    Given the args dictionary and suffix key creates an InVEST appropriate
+    suffix string that prepends an '_' when necessary and generates an
     empty string when necessary.
 
     Parameters:
@@ -22,8 +24,7 @@ def make_suffix_string(args, suffix_key):
             return "",
         If `args['suffix_key']` starts with '_' return `args['suffix_key']`
             else return '_'+`args['suffix_key']`
-        """
-
+    """
     try:
         file_suffix = args[suffix_key]
         if file_suffix != "" and not file_suffix.startswith('_'):

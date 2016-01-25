@@ -1,9 +1,9 @@
 Pyro4
-gdal>=1.9.0,<2.0
+gdal>=1.11.2,<2.0
 h5py>=2.3.0
 matplotlib
 natcap.versioner>=0.2.4
-numpy
+numpy>=1.10.2rc1
 nose
 coverage
 paramiko
