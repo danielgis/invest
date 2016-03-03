@@ -2417,7 +2417,7 @@ def build_bin(options):
         shutil.copytree, bindir, invest_dist)
 
     # Mac builds seem to need an egg placed in just the right place.
-    if platform.system() in ['Darwin', 'Linux']:
+    if platform.system() in ['Linux']:
         sitepkgs_egg_glob = os.path.join(sitepkgs, 'natcap.versioner-*.egg')
         try:
             # If natcap.versioner was installed as an egg, just take that and
@@ -2479,6 +2479,15 @@ def build_bin(options):
         _write_console_files(binary, 'bat')
     else:
         binary = os.path.join(invest_dist, 'invest')
+        if platform.system() == 'Darwin':
+            # Patch for correct dylibs until better pyinstaller solution found
+            if not all([os.path.exists(i) for i in ['/usr/local/Cellar/libpng/', '/usr/local/Cellar/geos/']]):
+                msg = 'Mac builds require a homebrew version of libpng and geos libraries to be installed.'
+                raise BuildFailure(msg)
+            sh('cp -R /usr/local/Cellar/libpng/*/lib/*dylib %s' % invest_dist)
+            sh('cp -R /usr/local/Cellar/geos/*/lib/*dylib %s' % invest_dist)
+
+
         _write_console_files(binary, 'sh')
 
 
