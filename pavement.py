@@ -1134,6 +1134,11 @@ def after_install(options, home_dir):
         with open(init_file, 'w') as namespace_init:
             namespace_init.write(init_string)
 
+    if platform.system() == 'Darwin':
+        site_pkg_dir = os.path.join(options.env.envname, 'lib', 'python2.7', 'site-packages')
+        sh('ln -s /usr/local/lib/python2.7/site-packages/PyQt4 %s' % site_pkg_dir)
+        sh('ln -s /usr/local/lib/python2.7/site-packages/sip* %s' % site_pkg_dir)
+
     print '*** To activate the env, run:'
     if platform.system() == 'Windows':
         print r'    call .\%s\Scripts\activate' % options.env.envname
@@ -2445,7 +2450,7 @@ def build_bin(options):
         shutil.copytree, bindir, invest_dist)
 
     # Mac builds seem to need an egg placed in just the right place.
-    if platform.system() in ['Darwin', 'Linux']:
+    if platform.system() in ['Linux']:
         sitepkgs_egg_glob = os.path.join(sitepkgs, 'natcap.versioner-*.egg')
         try:
             # If natcap.versioner was installed as an egg, just take that and
