@@ -14,7 +14,7 @@ from osgeo import ogr
 import pygeoprocessing
 import pygeoprocessing.routing
 import pygeoprocessing.routing.routing_core
-from  ..  import utils
+from .. import utils
 
 import seasonal_water_yield_core  #pylint: disable=import-error
 
@@ -24,7 +24,7 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 LOGGER = logging.getLogger(
     'natcap.invest.seasonal_water_yield.seasonal_water_yield')
 
-N_MONTHS = 12
+_N_MONTHS = 12
 MONTH_ID_TO_LABEL = [
     'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct',
     'nov', 'dec']
@@ -45,9 +45,9 @@ _OUTPUT_BASE_FILES = {
 
 _INTERMEDIATE_BASE_FILES = {
     'aet_path': 'aet.tif',
-    'aetm_path_list': ['aetm_%d.tif' % (x+1) for x in xrange(N_MONTHS)],
+    'aetm_path_list': ['aetm_%d.tif' % (x+1) for x in xrange(_N_MONTHS)],
     'flow_dir_path': 'flow_dir.tif',
-    'qfm_path_list': ['qf_%d.tif' % (x+1) for x in xrange(N_MONTHS)],
+    'qfm_path_list': ['qf_%d.tif' % (x+1) for x in xrange(_N_MONTHS)],
     'stream_path': 'stream.tif',
 }
 
@@ -65,10 +65,10 @@ _TMP_BASE_FILES = {
     'soil_group_aligned_path': 'soil_group_aligned.tif',
     'soil_group_valid_path': 'soil_group_valid.tif',
     'flow_accum_path': 'flow_accum.tif',
-    'precip_path_aligned_list': ['prcp_a%d.tif' % x for x in xrange(N_MONTHS)],
-    'n_events_path_list': ['n_events%d.tif' % x for x in xrange(N_MONTHS)],
-    'et0_path_aligned_list': ['et0_a%d.tif' % x for x in xrange(N_MONTHS)],
-    'kc_path_list': ['kc_%d.tif' % x for x in xrange(N_MONTHS)],
+    'precip_path_aligned_list': ['prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
+    'n_events_path_list': ['n_events%d.tif' % x for x in xrange(_N_MONTHS)],
+    'et0_path_aligned_list': ['et0_a%d.tif' % x for x in xrange(_N_MONTHS)],
+    'kc_path_list': ['kc_%d.tif' % x for x in xrange(_N_MONTHS)],
     'l_aligned_path': 'l_aligned.tif',
     'cz_aligned_raster_path': 'cz_aligned.tif',
     }
@@ -236,7 +236,7 @@ def _execute(args):
             os.path.join(args['precip_dir'], f) for f in os.listdir(
                 args['precip_dir'])]
 
-        for month_index in range(1, N_MONTHS + 1):
+        for month_index in range(1, _N_MONTHS + 1):
             month_file_match = re.compile(r'.*[^\d]%d\.[^.]+$' % month_index)
 
             for data_type, dir_list, path_list in [
@@ -337,7 +337,7 @@ def _execute(args):
     else:
         # user didn't predefine local recharge so calculate it
         LOGGER.info('loading number of monthly events')
-        for month_id in xrange(N_MONTHS):
+        for month_id in xrange(_N_MONTHS):
             if args['user_defined_climate_zones']:
                 cz_rain_events_lookup = (
                     pygeoprocessing.get_lookup_from_table(
@@ -370,7 +370,7 @@ def _execute(args):
             file_registry['cn_path'], file_registry['stream_path'],
             file_registry['si_path'])
 
-        for month_index in xrange(N_MONTHS):
+        for month_index in xrange(_N_MONTHS):
             LOGGER.info('calculate quick flow for month %d', month_index+1)
             _calculate_monthly_quick_flow(
                 file_registry['precip_path_aligned_list'][month_index],
