@@ -299,6 +299,7 @@ def _execute(args):
     for month_index in xrange(_N_MONTHS):
         _calculate_aet_uphill(
             file_registry['precip_path_aligned_list'][month_index],
+            file_registry['kc_path_aligned_list'][month_index],
             file_registry['et0_path_aligned_list'][month_index],
             file_registry['pawc_aligned_path'],
             file_registry['wm_path_list'][month_index],
@@ -891,41 +892,46 @@ def _mask_any_nodata(input_raster_path_list, output_raster_path_list):
             vectorize_op=False, datasets_are_pre_aligned=True)
 
 def _calculate_aet_uphill(
-        precip_path, et0_path, pawc_path, out_wm_path, out_aet_path):
+        precip_path, kc_path, et0_path, pawc_path, out_wm_path, out_aet_path):
     """Calculate uphill AET (case 1 in notes).
 
     Parameters:
         precip_path: (string) path to precipitation raster (mm).
+        kc_path: (string) path to the per pixel Kc values.
         et0_path: (string) path to monthly potential evapotranspiration
             raster (mm).
         pawc_path: (string) path to the plant available water content raster
             (mm).
-        out_wm_path: (string) path to output P/et0 ratio
+        out_wm_path: (string) path to output P/et0 ratio.
         out_aet_path: (string) path to output actual evapotranspiration raster
             (mm).
 
     Returns:
         None.
     """
-
     precip_nodata = pygeoprocessing.get_nodata_from_uri(precip_path)
-    et0_nodata = pygeoprocessing.get_nodata_from_uri(pawc_path)
+    et0_nodata = pygeoprocessing.get_nodata_from_uri(et0_path)
+    kc_nodata = pygeoprocessing.get_nodata_from_uri(kc_path)
     aet_nodata = -1  # -1 makes sense since AET >= 0.0
     pixel_size = pygeoprocessing.get_cell_size_from_uri(precip_path)
 
-    def _w_m_op(precip_array, et0_array):
+    def _w_m_op(precip_array, et0_array, kc_array):
         """Calculate W_m in equation 2a."""
         result = numpy.array(precip_array.shape, dtype=numpy.float32)
         result[:] = aet_nodata
         valid_mask = (
             (precip_array != precip_nodata) &
             (et0_array != et0_nodata) &
+            (kc_array != kc_nodata) &
             (et0_array != 0.0))
 
-        result[valid_mask] = precip_array[valid_mask] / et0_array[valid_mask]
-        result[et0_array == 0] = 0.0
+        pet_array = kc_array[valid_mask] * et0_array[valid_mask]
+        result[valid_mask] = precip_array[valid_mask] / pet_array
+        result[valid_mask][pet_array == 0] = 0.0
+        return result
 
+    LOGGER.info("calculate Wm")
     pygeoprocessing.vectorize_datasets(
-        [precip_path, et0_path], _w_m_op, out_wm_path, gdal.GDT_Float32,
-        aet_nodata, pixel_size, 'intersection', vectorize_op=False,
-        datasets_are_pre_aligned=True)
+        [precip_path, et0_path, kc_path], _w_m_op, out_wm_path,
+        gdal.GDT_Float32, aet_nodata, pixel_size, 'intersection',
+        vectorize_op=False, datasets_are_pre_aligned=True)
