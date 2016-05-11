@@ -69,7 +69,9 @@ _TMP_BASE_FILES = {
         'prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
     'n_events_path_list': ['n_events%d.tif' % x for x in xrange(_N_MONTHS)],
     'et0_path_aligned_list': ['et0_a%d.tif' % x for x in xrange(_N_MONTHS)],
+    'pet_path_aligned_list': ['pet%d.tif' % x for x in xrange(_N_MONTHS)],
     'kc_path_list': ['kc_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'z_rm_path_list': ['z_rm_%d.tif' % x for x in xrange(_N_MONTHS)],
     'pawc_aligned_path': 'pawc_aligned.tif',
     'wm_path_list': ['wm%d.tif' % x for x in xrange(_N_MONTHS)],
     'l_aligned_path': 'l_aligned.tif',
@@ -304,7 +306,9 @@ def _execute(args):
             file_registry['pawc_aligned_path'],
             file_registry['n_events_path_list'][month_index],
             file_registry['root_depth_aligned_path'],
+            file_registry['pet_path_list'][month_index],
             file_registry['wm_path_list'][month_index],
+            file_registry['z_rm_path_list'][month_index],
             file_registry['aetm_path_list'][month_index])
 
     return
@@ -896,7 +900,8 @@ def _mask_any_nodata(input_raster_path_list, output_raster_path_list):
 
 def _calculate_aet_uphill(
         precip_path, kc_path, et0_path, pawc_path, n_events_path,
-        root_depth_path, out_wm_path, out_aet_path):
+        root_depth_path, out_pet_path, out_wm_path, out_z_rm_path,
+        out_aet_path):
     """Calculate uphill AET (case 1 in notes).
 
     Parameters:
@@ -909,37 +914,52 @@ def _calculate_aet_uphill(
         n_events_path: (string) path to raster that shows number of rain
             events per month on that pixel (unitless).
         root_depth_path: (string) path to root depth raster.
-        out_wm_path: (string) path to output P/et0 ratio.
+        out_pet_path: (string) path to output PET.
+        out_wm_path: (string) path to output P/PET ratio.
         out_aet_path: (string) path to output actual evapotranspiration raster
             (mm).
 
     Returns:
         None.
     """
-    LOGGER.info("calculate Wm")
-    precip_nodata = pygeoprocessing.get_nodata_from_uri(precip_path)
+    LOGGER.info("calculate PET")
     et0_nodata = pygeoprocessing.get_nodata_from_uri(et0_path)
     kc_nodata = pygeoprocessing.get_nodata_from_uri(kc_path)
-    aet_nodata = -1  # -1 makes sense since AET >= 0.0
+    pet_nodata = et0_nodata  # reasonable to set PET nodata to et0 nodata
     pixel_size = pygeoprocessing.get_cell_size_from_uri(precip_path)
 
-    def _w_m_op(precip_array, et0_array, kc_array):
+    def _pet_op(et0_array, kc_array):
+        """Calculate PET."""
+        result = numpy.array(et0_array.shape, dtype=numpy.float32)
+        result[:] = pet_nodata
+        valid_mask = ((et0_array != et0_nodata) & (kc_array != kc_nodata))
+        result[valid_mask] = et0_array[valid_mask] * kc_array[valid_mask]
+        return result
+
+    pygeoprocessing.vectorize_datasets(
+        [et0_path, kc_path], _pet_op, out_pet_path,
+        gdal.GDT_Float32, pet_nodata, pixel_size, 'intersection',
+        vectorize_op=False, datasets_are_pre_aligned=True)
+
+    LOGGER.info("calculate Wm")
+    precip_nodata = pygeoprocessing.get_nodata_from_uri(precip_path)
+    aet_nodata = -1  # -1 makes sense since AET >= 0.0
+
+    def _w_m_op(precip_array, pet_array):
         """Calculate W_m in equation 2a."""
         result = numpy.array(precip_array.shape, dtype=numpy.float32)
         result[:] = aet_nodata
         valid_mask = (
             (precip_array != precip_nodata) &
-            (et0_array != et0_nodata) &
-            (kc_array != kc_nodata) &
-            (et0_array != 0.0))
+            (pet_array != pet_nodata) &
+            (pet_array != 0.0))
 
-        pet_array = kc_array[valid_mask] * et0_array[valid_mask]
         result[valid_mask] = precip_array[valid_mask] / pet_array
         result[valid_mask][pet_array == 0] = 0.0
         return result
 
     pygeoprocessing.vectorize_datasets(
-        [precip_path, et0_path, kc_path], _w_m_op, out_wm_path,
+        [precip_path, out_pet_path], _w_m_op, out_wm_path,
         gdal.GDT_Float32, aet_nodata, pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
@@ -969,6 +989,32 @@ def _calculate_aet_uphill(
         return result
 
     pygeoprocessing.vectorize_datasets(
-        [precip_path, et0_path, kc_path], _z_rm_op, out_wm_path,
+        [precip_path, et0_path, kc_path], _z_rm_op, out_z_rm_path,
         gdal.GDT_Float32, aet_nodata, pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
+
+    LOGGER.info("calculating AET1")
+
+    def _aet1_op(pet_array, root_depth_array, w_m_array, z_rm_array):
+        """Calculate AET1."""
+        result = numpy.array(pet_array.shape, dtype=numpy.float32)
+        result[:] = aet_nodata
+        valid_mask = (
+            (pet_array != pet_nodata) &
+            (root_depth_array != root_depth_nodata) &
+            (w_m_array != aet_nodata) &
+            (z_rm_array != aet_nodata))
+
+        result[valid_mask] = (
+            pet_array[valid_mask] * w_m_array[valid_mask] * (
+                numpy.exp(
+                    z_rm_array[valid_mask] *
+                    (1 - w_m_array[valid_mask])) - 1) / (
+                        numpy.exp(
+                            z_rm_array[valid_mask] * (
+                                1 - w_m_array[valid_mask])) - 1))
+
+    pygeoprocessing.vectorize_datasets(
+        [out_pet_path, root_depth_path, out_wm_path, out_z_rm_path], _aet1_op,
+        out_aet_path, gdal.GDT_Float32, aet_nodata, pixel_size,
+        'intersection', vectorize_op=False, datasets_are_pre_aligned=True)
