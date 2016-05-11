@@ -1,4 +1,4 @@
-"""InVEST Seasonal water yield model tests that use the InVEST sample data"""
+"""InVEST Seasonal water yield model tests that use the InVEST sample data."""
 
 import glob
 import unittest
