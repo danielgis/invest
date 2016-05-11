@@ -65,10 +65,13 @@ _TMP_BASE_FILES = {
     'soil_group_aligned_path': 'soil_group_aligned.tif',
     'soil_group_valid_path': 'soil_group_valid.tif',
     'flow_accum_path': 'flow_accum.tif',
-    'precip_path_aligned_list': ['prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
+    'precip_path_aligned_list': [
+        'prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
     'n_events_path_list': ['n_events%d.tif' % x for x in xrange(_N_MONTHS)],
     'et0_path_aligned_list': ['et0_a%d.tif' % x for x in xrange(_N_MONTHS)],
     'kc_path_list': ['kc_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'pawc_aligned_path': 'pawc_aligned.tif',
+    'wm_path_list': ['wm%d.tif' % x for x in xrange(_N_MONTHS)],
     'l_aligned_path': 'l_aligned.tif',
     'cz_aligned_raster_path': 'cz_aligned.tif',
     }
@@ -225,6 +228,7 @@ def _execute(args):
     input_align_list = [args['lulc_raster_path'], args['dem_raster_path']]
     output_align_list = [
         file_registry['lulc_aligned_path'], file_registry['dem_aligned_path']]
+
     if not args['user_defined_local_recharge']:
         precip_path_list = []
         et0_path_list = []
@@ -291,6 +295,16 @@ def _execute(args):
         output_valid_raster_path_list.append(
             file_registry['soil_group_valid_path'])
     _mask_any_nodata(input_raster_path_list, output_valid_raster_path_list)
+
+    for month_index in xrange(_N_MONTHS):
+        _calculate_aet_uphill(
+            file_registry['precip_path_aligned_list'][month_index],
+            file_registry['et0_path_aligned_list'][month_index],
+            file_registry['pawc_aligned_path'],
+            file_registry['wm_path_list'][month_index],
+            file_registry['aetm_path_list'][month_index])
+
+    return
 
     LOGGER.info('flow direction')
     pygeoprocessing.routing.flow_direction_d_inf(
@@ -875,3 +889,43 @@ def _mask_any_nodata(input_raster_path_list, output_raster_path_list):
             mask_if_not_both_valid, output_raster_path_list[index],
             gdal.GDT_Float32, nodata_list[0], pixel_size, 'intersection',
             vectorize_op=False, datasets_are_pre_aligned=True)
+
+def _calculate_aet_uphill(
+        precip_path, et0_path, pawc_path, out_wm_path, out_aet_path):
+    """Calculate uphill AET (case 1 in notes).
+
+    Parameters:
+        precip_path: (string) path to precipitation raster (mm).
+        et0_path: (string) path to monthly potential evapotranspiration
+            raster (mm).
+        pawc_path: (string) path to the plant available water content raster
+            (mm).
+        out_wm_path: (string) path to output P/et0 ratio
+        out_aet_path: (string) path to output actual evapotranspiration raster
+            (mm).
+
+    Returns:
+        None.
+    """
+
+    precip_nodata = pygeoprocessing.get_nodata_from_uri(precip_path)
+    et0_nodata = pygeoprocessing.get_nodata_from_uri(pawc_path)
+    aet_nodata = -1  # -1 makes sense since AET >= 0.0
+    pixel_size = pygeoprocessing.get_cell_size_from_uri(precip_path)
+
+    def _w_m_op(precip_array, et0_array):
+        """Calculate W_m in equation 2a."""
+        result = numpy.array(precip_array.shape, dtype=numpy.float32)
+        result[:] = aet_nodata
+        valid_mask = (
+            (precip_array != precip_nodata) &
+            (et0_array != et0_nodata) &
+            (et0_array != 0.0))
+
+        result[valid_mask] = precip_array[valid_mask] / et0_array[valid_mask]
+        result[et0_array == 0] = 0.0
+
+    pygeoprocessing.vectorize_datasets(
+        [precip_path, et0_path], _w_m_op, out_wm_path, gdal.GDT_Float32,
+        aet_nodata, pixel_size, 'intersection', vectorize_op=False,
+        datasets_are_pre_aligned=True)
