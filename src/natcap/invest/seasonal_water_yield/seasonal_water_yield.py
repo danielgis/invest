@@ -59,7 +59,9 @@ _TMP_BASE_FILES = {
     'dem_aligned_path': 'dem_aligned.tif',
     'lulc_valid_path': 'lulc_valid.tif',
     'dem_valid_path': 'dem_valid.tif',
+    'slope_path': 'slope.tif',
     'loss_path': 'loss.tif',
+    'soil_depth_aligned_path': 'soil_depth.tif',
     'zero_absorption_source_path': 'zero_absorption.tif',
     'soil_group_aligned_path': 'soil_group_aligned.tif',
     'soil_group_valid_path': 'soil_group_valid.tif',
@@ -87,6 +89,7 @@ SI_NODATA = -1.0
 CN_NODATA = -1.0
 AET_NODATA = -1.0
 L1_NODATA = -1.0
+
 
 def execute(args):
     """InVEST seasonal water yield model.
@@ -128,6 +131,8 @@ def execute(args):
                 2: B
                 3: C
                 4: D
+        args['soil_depth_raster_path'] (string): path to raster that indicates
+            soil depth per pixel in mm.
         args['aoi_path'] (string): path to a vector that indicates the area
             over which the model should be run, as well as the area in which
             to aggregate over when calculating the output Qb.
@@ -245,11 +250,13 @@ def _execute(args):
     input_align_list = [
         args['lulc_raster_path'],
         args['dem_raster_path'],
-        args['pawc_raster_path']]
+        args['pawc_raster_path'],
+        args['soil_depth_raster_path']]
     output_align_list = [
         file_registry['lulc_aligned_path'],
         file_registry['dem_aligned_path'],
-        file_registry['pawc_aligned_path']]
+        file_registry['pawc_aligned_path'],
+        file_registry['soil_depth_aligned_path']]
 
     if not args['user_defined_local_recharge']:
         precip_path_list = []
@@ -381,7 +388,6 @@ def _execute(args):
             file_registry['l1_path_list'][month_index]
             )
 
-    return
 
     LOGGER.info('flow direction')
     pygeoprocessing.routing.flow_direction_d_inf(
@@ -399,6 +405,17 @@ def _execute(args):
         file_registry['flow_dir_path'],
         file_registry['dem_valid_path'],
         file_registry['flow_accum_path'])
+
+    LOGGER.info('calculate slope')
+    pygeoprocessing.calculate_slope(
+        file_registry['dem_valid_path'], file_registry['slope_path'])
+
+    LOGGER.info("Calculate TI")
+    _calculate_ti(
+        file_registry['flow_accum_path'], file_registry['slope_path'],
+        file_registry['soil_depth_aligned_path'], file_registry['ti_path'])
+    return
+
 
     LOGGER.info('stream thresholding')
     pygeoprocessing.routing.stream_threshold(
@@ -1124,3 +1141,7 @@ def _calculate_l1(precip_path, aet_path, l1_out_path):
         [precip_path, aet_path], _l1_op, l1_out_path, gdal.GDT_Float32,
         L1_NODATA, pixel_size, 'intersection', vectorize_op=False,
         datasets_are_pre_aligned=True)
+
+def _calculate_ti(
+    flow_accum_path, slope_path, soil_depth_path, ti_out_path):
+    pass
