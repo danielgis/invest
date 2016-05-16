@@ -1061,22 +1061,19 @@ def _calculate_aet_uphill(
                 numpy.exp(exponent[~pos_exponent]) -
                 w_m_array[valid_mask][~pos_exponent])
 
+            # this section calculates the fraction on the reduced set so it
+            # can be copied back to the full result
             denom_nonzero_mask = denominator != 0
-            result[valid_mask][denom_nonzero_mask] = (
+            intermediate_result = numpy.empty(
+                exponent.shape, dtype=numpy.float32)
+            intermediate_result[denom_nonzero_mask] = (
                 pet_array[valid_mask][denom_nonzero_mask] *
                 w_m_array[valid_mask][denom_nonzero_mask] * (
                     numerator[denom_nonzero_mask] /
                     denominator[denom_nonzero_mask]))
-            result[valid_mask][~denom_nonzero_mask] = 0.0
+            intermediate_result[~denom_nonzero_mask] = 0.0
+            result[valid_mask] = intermediate_result
 
-            #result[valid_mask] = (
-            #    pet_array[valid_mask] * w_m_array[valid_mask] * (
-            #        numpy.exp(
-            #            z_rm_array[valid_mask] *
-            #            (1 - w_m_array[valid_mask])) - 1) / (
-            #                numpy.exp(
-            #                    z_rm_array[valid_mask] * (
-            #                        1 - w_m_array[valid_mask])) - 1))
             return result
         except RuntimeWarning:
             LOGGER.debug(numpy.sort(z_rm_array[valid_mask]))
