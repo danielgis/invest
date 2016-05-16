@@ -63,6 +63,18 @@
           "helpText": "The selected folder has a list of monthly precipitation files with a specified format."
         },
         {
+          "id": "pawc_raster_path",
+          "args_id": "pawc_raster_path",
+          "type": "file",
+          "label": "Plant Available Water Content (Raster)",
+          "defaultValue": "../seasonal_water_yield/pawc.tif",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          },
+          "helpText": "A GDAL-supported raster file containing plant available water content values for each cell. The plant available water content fraction should be a value between 0 and 1."
+        },
+        {
           "id": "dem_raster_path",
           "args_id": "dem_raster_path",
           "type": "file",
