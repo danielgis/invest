@@ -67,13 +67,14 @@ _TMP_BASE_FILES = {
     'root_depth_path': 'root_depth.tif',
     'precip_path_aligned_list': [
         'prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
-    'n_events_path_list': ['n_events%d.tif' % x for x in xrange(_N_MONTHS)],
-    'et0_path_aligned_list': ['et0_a%d.tif' % x for x in xrange(_N_MONTHS)],
-    'pet_path_aligned_list': ['pet%d.tif' % x for x in xrange(_N_MONTHS)],
+    'n_events_path_list': ['n_events_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'et0_path_aligned_list': ['et0_a_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'pet_path_aligned_list': ['pet_%d.tif' % x for x in xrange(_N_MONTHS)],
     'kc_path_list': ['kc_%d.tif' % x for x in xrange(_N_MONTHS)],
     'z_rm_path_list': ['z_rm_%d.tif' % x for x in xrange(_N_MONTHS)],
     'pawc_aligned_path': 'pawc_aligned.tif',
-    'wm_path_list': ['wm%d.tif' % x for x in xrange(_N_MONTHS)],
+    'wm_path_list': ['wm_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'l1_path_list': ['l1_%d.tif' % x for x in xrange(_N_MONTHS)],
     'l_aligned_path': 'l_aligned.tif',
     'cz_aligned_raster_path': 'cz_aligned.tif',
     }
@@ -85,7 +86,7 @@ KC_NODATA = -1.0
 SI_NODATA = -1.0
 CN_NODATA = -1.0
 AET_NODATA = -1.0
-
+L1_NODATA = -1.0
 
 def execute(args):
     """InVEST seasonal water yield model.
@@ -263,7 +264,6 @@ def _execute(args):
 
         for month_index in range(1, _N_MONTHS + 1):
             month_file_match = re.compile(r'.*[^\d]%d\.[^.]+$' % month_index)
-
             for data_type, dir_list, path_list in [
                     ('et0', et0_dir_list, et0_path_list),
                     ('Precip', precip_dir_list, precip_path_list)]:
@@ -361,6 +361,7 @@ def _execute(args):
                 file_registry['n_events_path_list'][month_id])
 
     for month_index in xrange(_N_MONTHS):
+        LOGGER.info("For month %d: ", month_index)
         _calculate_aet_uphill(
             file_registry['precip_path_aligned_list'][month_index],
             file_registry['kc_path_list'][month_index],
@@ -372,6 +373,13 @@ def _execute(args):
             file_registry['wm_path_list'][month_index],
             file_registry['z_rm_path_list'][month_index],
             file_registry['aetm_path_list'][month_index])
+
+        LOGGER.info("Calculate L1")
+        _calculate_l1(
+            file_registry['precip_path_aligned_list'][month_index],
+            file_registry['aetm_path_list'][month_index],
+            file_registry['l1_path_list'][month_index]
+            )
 
     return
 
@@ -1084,3 +1092,35 @@ def _calculate_aet_uphill(
         [out_pet_path, root_depth_path, out_wm_path, out_z_rm_path], _aet1_op,
         out_aet_path, gdal.GDT_Float32, AET_NODATA, pixel_size,
         'intersection', vectorize_op=False, datasets_are_pre_aligned=True)
+
+
+def _calculate_l1(precip_path, aet_path, l1_out_path):
+    """Calculate L1 as P-AET1.
+
+    Parameters:
+        precip_path (string): path to precipitation raster.
+        aet_path (string): path to AET raster.
+        l1_out_path (string): path to output L1 raster.
+
+    Returns:
+        None.
+    """
+    precip_nodata = pygeoprocessing.get_nodata_from_uri(precip_path)
+    aet_nodata = pygeoprocessing.get_nodata_from_uri(aet_path)
+
+    def _l1_op(precip_array, aet_array):
+        """Calculate L1."""
+        valid_mask = (
+            (precip_array != precip_nodata) &
+            (aet_array != aet_nodata))
+        result = numpy.empty(precip_array.shape, dtype=numpy.float32)
+        result[:] = L1_NODATA
+        result[valid_mask] = (
+            precip_array[valid_mask] - aet_array[valid_mask])
+        return result
+
+    pixel_size = pygeoprocessing.get_cell_size_from_uri(precip_path)
+    pygeoprocessing.vectorize_datasets(
+        [precip_path, aet_path], _l1_op, l1_out_path, gdal.GDT_Float32,
+        L1_NODATA, pixel_size, 'intersection', vectorize_op=False,
+        datasets_are_pre_aligned=True)
