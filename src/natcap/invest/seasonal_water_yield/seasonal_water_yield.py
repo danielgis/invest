@@ -1024,12 +1024,11 @@ def _calculate_aet_uphill(
             n_events_array[valid_mask] /
             precip_array[valid_mask])
         precip_zero_mask = precip_array == 0
-        result[precip_zero_mask] = (
-            pawc_array[precip_zero_mask] * root_depth_array[precip_zero_mask])
+        result[precip_zero_mask] = 0
         return result
 
     pygeoprocessing.vectorize_datasets(
-        [root_depth_path, precip_path, et0_path, kc_path], _z_rm_op,
+        [root_depth_path, pawc_path, n_events_path, precip_path], _z_rm_op,
         out_z_rm_path, gdal.GDT_Float32, AET_NODATA, pixel_size,
         'intersection', vectorize_op=False, datasets_are_pre_aligned=True)
 
@@ -1046,17 +1045,42 @@ def _calculate_aet_uphill(
             (z_rm_array != AET_NODATA))
 
         try:
-            result[valid_mask] = (
-                pet_array[valid_mask] * w_m_array[valid_mask] * (
-                    numpy.exp(
-                        z_rm_array[valid_mask] *
-                        (1 - w_m_array[valid_mask])) - 1) / (
-                            numpy.exp(
-                                z_rm_array[valid_mask] * (
-                                    1 - w_m_array[valid_mask])) - 1))
+            # This section isolates positive versus negative exponents so that
+            # numpy.exp doesn't overflow with a large positive value
+            exponent = z_rm_array[valid_mask] * (1 - w_m_array[valid_mask])
+            pos_exponent = exponent >= 0
+            numerator = numpy.empty(exponent.shape, dtype=numpy.float32)
+            denominator = numpy.empty(exponent.shape, dtype=numpy.float32)
+            numerator[pos_exponent] = 1 - numpy.exp(-exponent[pos_exponent])
+            numerator[~pos_exponent] = numpy.exp(exponent[~pos_exponent]) - 1
+
+            denominator[pos_exponent] = (
+                1 - w_m_array[valid_mask][pos_exponent] *
+                numpy.exp(-exponent[pos_exponent]))
+            denominator[~pos_exponent] = (
+                numpy.exp(exponent[~pos_exponent]) -
+                w_m_array[valid_mask][~pos_exponent])
+
+            denom_nonzero_mask = denominator != 0
+            result[valid_mask][denom_nonzero_mask] = (
+                pet_array[valid_mask][denom_nonzero_mask] *
+                w_m_array[valid_mask][denom_nonzero_mask] * (
+                    numerator[denom_nonzero_mask] /
+                    denominator[denom_nonzero_mask]))
+            result[valid_mask][~denom_nonzero_mask] = 0.0
+
+            #result[valid_mask] = (
+            #    pet_array[valid_mask] * w_m_array[valid_mask] * (
+            #        numpy.exp(
+            #            z_rm_array[valid_mask] *
+            #            (1 - w_m_array[valid_mask])) - 1) / (
+            #                numpy.exp(
+            #                    z_rm_array[valid_mask] * (
+            #                        1 - w_m_array[valid_mask])) - 1))
+            return result
         except RuntimeWarning:
-            LOGGER.debug(z_rm_array[valid_mask])
-            LOGGER.debug(w_m_array[valid_mask])
+            LOGGER.debug(numpy.sort(z_rm_array[valid_mask]))
+            LOGGER.debug(numpy.sort(w_m_array[valid_mask]))
             raise
 
     pygeoprocessing.vectorize_datasets(
