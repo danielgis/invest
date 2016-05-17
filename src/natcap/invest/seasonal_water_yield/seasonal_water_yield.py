@@ -49,6 +49,7 @@ _INTERMEDIATE_BASE_FILES = {
     'flow_dir_path': 'flow_dir.tif',
     'qfm_path_list': ['qf_%d.tif' % (x+1) for x in xrange(_N_MONTHS)],
     'stream_path': 'stream.tif',
+    'ti_path': 'ti.tif',
 }
 
 _TMP_BASE_FILES = {
@@ -89,7 +90,7 @@ SI_NODATA = -1.0
 CN_NODATA = -1.0
 AET_NODATA = -1.0
 L1_NODATA = -1.0
-
+TI_NODATA = -1.0
 
 def execute(args):
     """InVEST seasonal water yield model.
@@ -1142,6 +1143,47 @@ def _calculate_l1(precip_path, aet_path, l1_out_path):
         L1_NODATA, pixel_size, 'intersection', vectorize_op=False,
         datasets_are_pre_aligned=True)
 
+
 def _calculate_ti(
-    flow_accum_path, slope_path, soil_depth_path, ti_out_path):
-    pass
+        flow_accum_path, slope_path, soil_depth_path, ti_out_path):
+    """Calculate topographic index from Eq. 5.
+
+    Parameters:
+        flow_accum_path (string): path to flow accumulation raster.
+        slope_path (string): path to slope raster in units (1/1).
+        soil_depth_path (string): path to raster of soil depth in mm.
+
+    Returns:
+        None.
+    """
+    flow_nodata = pygeoprocessing.get_nodata_from_uri(flow_accum_path)
+    slope_nodata = pygeoprocessing.get_nodata_from_uri(slope_path)
+    soil_depth_nodata = pygeoprocessing.get_nodata_from_uri(soil_depth_path)
+    cell_size = pygeoprocessing.get_cell_size_from_uri(flow_accum_path)
+
+    def _ti_op(flow_accum_array, slope_array, soil_depth_array):
+        """Calculate ti.
+
+        Returns:
+            Eq 5: TI = ln( A / (tan(beta) D)
+        """
+        result = numpy.empty(flow_accum_array.shape, dtype=numpy.float32)
+        zero_mask = (
+            (slope_array == 0) |
+            (soil_depth_array == 0) |
+            (flow_accum_array == 0))
+        valid_mask = (
+            (flow_accum_array != flow_nodata) &
+            (slope_array != slope_nodata) &
+            (soil_depth_array != soil_depth_nodata) & ~zero_mask)
+        result[:] = TI_NODATA
+        result[zero_mask] = 0.0
+        result[valid_mask] = numpy.log(
+            (flow_accum_array[valid_mask] / cell_size) / (
+                slope_array[valid_mask] * soil_depth_array[valid_mask]))
+        return result
+
+    pygeoprocessing.vectorize_datasets(
+        [flow_accum_path, slope_path, soil_depth_path], _ti_op, ti_out_path,
+        gdal.GDT_Float32, TI_NODATA, cell_size, 'intersection',
+        vectorize_op=False, datasets_are_pre_aligned=True)
