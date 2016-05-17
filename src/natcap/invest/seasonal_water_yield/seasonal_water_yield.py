@@ -80,6 +80,8 @@ _TMP_BASE_FILES = {
     'l1_path_list': ['l1_%d.tif' % x for x in xrange(_N_MONTHS)],
     'l_aligned_path': 'l_aligned.tif',
     'cz_aligned_raster_path': 'cz_aligned.tif',
+    'subsidized_out_path_list': [
+        'subsidized_%d.tif' % x for x in xrange(_N_MONTHS)],
     }
 
 ROOT_DEPTH_NODATA = -1.0
@@ -415,6 +417,15 @@ def _execute(args):
     _calculate_ti(
         file_registry['flow_accum_path'], file_registry['slope_path'],
         file_registry['soil_depth_aligned_path'], file_registry['ti_path'])
+
+    LOGGER.info("calculate subsidized area")
+    for month_index in xrange(_N_MONTHS):
+        LOGGER.info("For month %d: ", month_index)
+        _calculate_subsidized_area(
+            file_registry['l1_path_list'][month_index],
+            file_registry['pet_path_aligned_list'][month_index],
+            file_registry['ti_path'],
+            file_registry['subsidized_out_path_list'][month_index])
     return
 
 
@@ -1187,3 +1198,77 @@ def _calculate_ti(
         [flow_accum_path, slope_path, soil_depth_path], _ti_op, ti_out_path,
         gdal.GDT_Float32, TI_NODATA, cell_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
+
+
+def _calculate_subsidized_area(
+        l1_path, pet_path, ti_path, subsidized_out_path):
+    """Calculated subsidized area such that Eq. 4 is balanced.
+
+    Parameters:
+        l1_path (string): path to flow raster for upland regions.
+        pet_path (string): path to PET raster to use as a -1 * for flow
+            raster for subsidized regions.
+        ti_path (string): path to topographical index raster.
+        subsidized_out_path (string): path to output raster that masks out
+            the subsidized region.
+
+    Returns:
+        None.
+    """
+    (_, n_cols) = pygeoprocessing.get_row_col_from_uri(l1_path)
+    ti_array_cum = numpy.array([])
+    index_array_cum = numpy.array([])
+    pet_array_cum = numpy.array([])
+    l1_array_cum = numpy.array([])
+
+    l1_raster = gdal.Open(l1_path)
+    pet_raster = gdal.Open(pet_path)
+    l1_band = l1_raster.GetRasterBand(1)
+    pet_band = pet_raster.GetRasterBand(1)
+
+    l1_nodata = pygeoprocessing.get_nodata_from_uri(l1_path)
+    pet_nodata = pygeoprocessing.get_nodata_from_uri(pet_path)
+    ti_nodata = pygeoprocessing.get_nodata_from_uri(ti_path)
+
+    for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
+        (x_indexes, y_indexes) = numpy.meshgrid(
+            xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
+        index_array = (
+            x_indexes + block_info['xoff'] +
+            (y_indexes + block_info['yoff']) * n_cols)
+        pet_array = pet_band.ReadAsArray(**block_info)
+        l1_array = l1_band.ReadAsArray(**block_info)
+
+        valid_mask = (
+            (l1_array != l1_nodata) &
+            (pet_array != pet_nodata) &
+            (ti_array != ti_nodata))
+
+        index_array_cum = numpy.append(
+            index_array_cum, index_array[valid_mask])
+        ti_array_cum = numpy.append(ti_array_cum, ti_array[valid_mask])
+        pet_array_cum = numpy.append(pet_array_cum, pet_array[valid_mask])
+        l1_array_cum = numpy.append(l1_array_cum, l1_array[valid_mask])
+
+        # to get cols index_array % n_cols
+        # to get rows index_array / n_rows
+
+    # reverse sort from largest to smallest
+    sorted_indexes = numpy.argsort(-ti_array_cum)
+    masked_indexes = sorted_indexes[0:len(sorted_indexes)/10]
+    ti_mask_indexes = index_array_cum[masked_indexes]
+    pygeoprocessing.new_raster_from_base_uri(
+        ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
+        fill_value=TI_NODATA)
+    subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
+    subsidized_band = subsidized_raster.GetRasterBand(1)
+    for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
+        (x_indexes, y_indexes) = numpy.meshgrid(
+            xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
+        index_array = (
+            x_indexes + block_info['xoff'] +
+            (y_indexes + block_info['yoff']) * n_cols)
+        mask = numpy.in1d(index_array, ti_mask_indexes).reshape(
+            index_array.shape)
+        subsidized_band.WriteArray(
+            mask, xoff=block_info['xoff'], yoff=block_info['yoff'])
