@@ -1,5 +1,8 @@
 """InVEST Seasonal Water Yield Model."""
 
+import itertools
+import heapq
+import struct
 import collections
 import os
 import logging
@@ -1289,17 +1292,63 @@ class _OutOfCoreNumpyArray(object):
         self.array_dict = collections.defaultdict(lambda: numpy.array([]))
         self.working_dir = working_dir
 
+        # keep track of sorted files
+        self.array_files_dict = collections.defaultdict(list)
+        self.sorted = False
+
     def append(self, array_dict):
         """Append array to current array."""
+        if self.sorted:
+            raise ValueError("Can't append to sorted array.")
         for key, array in array_dict.iteritems():
             self.array_dict[key] = numpy.append(array, self.array_dict[key])
 
-    def sort(self, key):
-        """Out of core argsort on array."""
-        argsort = numpy.argsort(-self.array_dict[key])
-        for key in self.array_dict:
-            self.array_dict[key] = self.array_dict[key][argsort]
-
     def iterarray(self, key):
         """Iterate over a keyed array in memory chunks."""
-        yield self.array_dict[key]
+        chunk_size = 1000
+
+        def _read_buffer(filename):
+            current_seek_location = 0
+            buffer_size = chunk_size * 4
+            while True:
+                in_file = open(filename, 'rb')
+                in_file.seek(current_seek_location, 0)
+                data = in_file.read(buffer_size)
+                LOGGER.debug(data)
+                in_file.close()
+                if data == '':
+                    break
+                current_seek_location += len(data)
+                for value in struct.unpack('f'*len(data)/4, data):
+                    yield value
+
+        if not self.sorted:
+            raise ValueError("Not sorted.")
+
+        LOGGER.debug(self.array_files_dict)
+        array_iterator = heapq.merge([
+            _read_buffer(filename) for filename in
+            self.array_files_dict[key]])
+        LOGGER.debug(key)
+        while True:
+            array = numpy.array(
+                tuple(itertools.islice(array_iterator, chunk_size)))
+            LOGGER.debug(array)
+            if len(array) > 0:
+                yield array
+            else:
+                break
+
+    def sort(self, primary_key):
+        """Out of core argsort on array."""
+        argsort = numpy.argsort(-self.array_dict[primary_key])
+
+        for key, array in self.array_dict.iteritems():
+            file_path = os.path.join(self.working_dir, str(uuid.uuid4()))
+            self.array_files_dict[key].append(file_path)
+            with open(file_path, 'wb') as out_file:
+                # This sorts and writes the file array in one step
+                out_file.write(struct.pack('f'*len(array), *(array[argsort])))
+                self.array_dict[key] = numpy.array([])
+
+        self.sorted = True
