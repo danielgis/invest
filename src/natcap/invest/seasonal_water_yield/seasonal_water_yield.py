@@ -1,5 +1,6 @@
 """InVEST Seasonal Water Yield Model."""
 
+import collections
 import os
 import logging
 import re
@@ -1216,10 +1217,7 @@ def _calculate_subsidized_area(
         None.
     """
     (_, n_cols) = pygeoprocessing.get_row_col_from_uri(l1_path)
-    ti_array_cum = numpy.array([])
-    index_array_cum = numpy.array([])
-    pet_array_cum = numpy.array([])
-    l1_array_cum = numpy.array([])
+    array_sorter = _OutOfCoreNumpyArray(os.path.dirname(subsidized_out_path))
 
     l1_raster = gdal.Open(l1_path)
     pet_raster = gdal.Open(pet_path)
@@ -1244,31 +1242,64 @@ def _calculate_subsidized_area(
             (pet_array != pet_nodata) &
             (ti_array != ti_nodata))
 
-        index_array_cum = numpy.append(
-            index_array_cum, index_array[valid_mask])
-        ti_array_cum = numpy.append(ti_array_cum, ti_array[valid_mask])
-        pet_array_cum = numpy.append(pet_array_cum, pet_array[valid_mask])
-        l1_array_cum = numpy.append(l1_array_cum, l1_array[valid_mask])
-
-        # to get cols index_array % n_cols
-        # to get rows index_array / n_rows
+        array_sorter.append(
+            {
+                'index_array':  index_array[valid_mask],
+                'ti_array': ti_array[valid_mask],
+                'pet_array': pet_array[valid_mask],
+                'l1_array': l1_array[valid_mask],
+            })
 
     # reverse sort from largest to smallest
-    sorted_indexes = numpy.argsort(-ti_array_cum)
-    masked_indexes = sorted_indexes[0:len(sorted_indexes)/10]
-    ti_mask_indexes = index_array_cum[masked_indexes]
+    array_sorter.sort('ti_array')
+
     pygeoprocessing.new_raster_from_base_uri(
         ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
         fill_value=TI_NODATA)
     subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
     subsidized_band = subsidized_raster.GetRasterBand(1)
-    for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
-        (x_indexes, y_indexes) = numpy.meshgrid(
-            xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
-        index_array = (
-            x_indexes + block_info['xoff'] +
-            (y_indexes + block_info['yoff']) * n_cols)
-        mask = numpy.in1d(index_array, ti_mask_indexes).reshape(
-            index_array.shape)
-        subsidized_band.WriteArray(
-            mask, xoff=block_info['xoff'], yoff=block_info['yoff'])
+
+    total_indexes = index_array.size / 10
+    for sorted_indexes in array_sorter.iterarray('index_array'):
+        sorted_indexes = sorted_indexes[0:total_indexes]
+        total_indexes = total_indexes - sorted_indexes.size
+        for block_info, subsidized_mask_array in pygeoprocessing.iterblocks(
+                subsidized_out_path):
+            (x_indexes, y_indexes) = numpy.meshgrid(
+                xrange(subsidized_mask_array.shape[1]), xrange(
+                    subsidized_mask_array.shape[0]))
+            index_array = (
+                x_indexes + block_info['xoff'] +
+                (y_indexes + block_info['yoff']) * n_cols)
+            mask = numpy.in1d(index_array, sorted_indexes).reshape(
+                index_array.shape)
+            subsidized_mask_array[mask] = 1
+            subsidized_band.WriteArray(
+                subsidized_mask_array, xoff=block_info['xoff'],
+                yoff=block_info['yoff'])
+        if total_indexes == 0:
+            break
+
+
+class _OutOfCoreNumpyArray(object):
+    """Abstraction of a numpy array that can sort out of core."""
+
+    def __init__(self, working_dir):
+        """Construct an empty out of core array."""
+        self.array_dict = collections.defaultdict(lambda: numpy.array([]))
+        self.working_dir = working_dir
+
+    def append(self, array_dict):
+        """Append array to current array."""
+        for key, array in array_dict.iteritems():
+            self.array_dict[key] = numpy.append(array, self.array_dict[key])
+
+    def sort(self, key):
+        """Out of core argsort on array."""
+        argsort = numpy.argsort(-self.array_dict[key])
+        for key in self.array_dict:
+            self.array_dict[key] = self.array_dict[key][argsort]
+
+    def iterarray(self, key):
+        """Iterate over a keyed array in memory chunks."""
+        yield self.array_dict[key]
