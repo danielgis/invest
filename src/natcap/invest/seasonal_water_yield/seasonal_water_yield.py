@@ -1220,7 +1220,8 @@ def _calculate_subsidized_area(
         None.
     """
     (_, n_cols) = pygeoprocessing.get_row_col_from_uri(l1_path)
-    array_sorter = _OutOfCoreNumpyArray(os.path.dirname(subsidized_out_path))
+    array_sorter = _OutOfCoreNumpyArray(
+        os.path.dirname(subsidized_out_path), 'ti_array')
 
     l1_raster = gdal.Open(l1_path)
     pet_raster = gdal.Open(pet_path)
@@ -1253,17 +1254,14 @@ def _calculate_subsidized_area(
                 'l1_array': l1_array[valid_mask],
             })
 
-    # reverse sort from largest to smallest
-    array_sorter.sort('ti_array')
-
     pygeoprocessing.new_raster_from_base_uri(
         ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
         fill_value=TI_NODATA)
-    subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
-    subsidized_band = subsidized_raster.GetRasterBand(1)
 
-    total_indexes = index_array.size / 10
+    total_indexes = index_array.size / 4
     for sorted_indexes in array_sorter.iterarray('index_array'):
+        subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
+        subsidized_band = subsidized_raster.GetRasterBand(1)
         sorted_indexes = sorted_indexes[0:total_indexes]
         total_indexes = total_indexes - sorted_indexes.size
         for block_info, subsidized_mask_array in pygeoprocessing.iterblocks(
@@ -1280,6 +1278,10 @@ def _calculate_subsidized_area(
             subsidized_band.WriteArray(
                 subsidized_mask_array, xoff=block_info['xoff'],
                 yoff=block_info['yoff'])
+        subsidized_band.FlushCache()
+        subsidized_raster.FlushCache()
+        subsidized_band = None
+        subsidized_raster = None
         if total_indexes == 0:
             break
 
@@ -1287,24 +1289,32 @@ def _calculate_subsidized_area(
 class _OutOfCoreNumpyArray(object):
     """Abstraction of a numpy array that can sort out of core."""
 
-    def __init__(self, working_dir):
+    _MAX_SIZE = 40000
+
+    def __init__(self, working_dir, primary_key):
         """Construct an empty out of core array."""
         self.array_dict = collections.defaultdict(lambda: numpy.array([]))
         self.working_dir = working_dir
+        self.primary_key = primary_key
 
         # keep track of sorted files
         self.array_files_dict = collections.defaultdict(list)
-        self.sorted = False
 
     def append(self, array_dict):
         """Append array to current array."""
-        if self.sorted:
-            raise ValueError("Can't append to sorted array.")
+        first_key = array_dict.iterkeys().next()
+        if ((len(self.array_dict[first_key]) != 0) and
+                (len(self.array_dict[first_key]) +
+                 len(array_dict[first_key])) > self._MAX_SIZE):
+            # save off all the current arrays to files
+            self._sort()
+
         for key, array in array_dict.iteritems():
             self.array_dict[key] = numpy.append(array, self.array_dict[key])
 
     def iterarray(self, key):
         """Iterate over a keyed array in memory chunks."""
+        self._sort()
         chunk_size = 1000
 
         def _read_buffer(filename):
@@ -1314,34 +1324,30 @@ class _OutOfCoreNumpyArray(object):
                 in_file = open(filename, 'rb')
                 in_file.seek(current_seek_location, 0)
                 data = in_file.read(buffer_size)
-                LOGGER.debug(data)
                 in_file.close()
                 if data == '':
                     break
                 current_seek_location += len(data)
-                for value in struct.unpack('f'*len(data)/4, data):
+                for value in struct.unpack('f'*(len(data)/4), data):
                     yield value
 
-        if not self.sorted:
-            raise ValueError("Not sorted.")
-
-        LOGGER.debug(self.array_files_dict)
-        array_iterator = heapq.merge([
+        array_iterator = heapq.merge(*[
             _read_buffer(filename) for filename in
             self.array_files_dict[key]])
-        LOGGER.debug(key)
         while True:
             array = numpy.array(
                 tuple(itertools.islice(array_iterator, chunk_size)))
-            LOGGER.debug(array)
             if len(array) > 0:
                 yield array
             else:
                 break
 
-    def sort(self, primary_key):
+    def _sort(self):
         """Out of core argsort on array."""
-        argsort = numpy.argsort(-self.array_dict[primary_key])
+        if len(self.array_dict[self.primary_key]) == 0:
+            return
+
+        argsort = numpy.argsort(-self.array_dict[self.primary_key])
 
         for key, array in self.array_dict.iteritems():
             file_path = os.path.join(self.working_dir, str(uuid.uuid4()))
@@ -1350,5 +1356,3 @@ class _OutOfCoreNumpyArray(object):
                 # This sorts and writes the file array in one step
                 out_file.write(struct.pack('f'*len(array), *(array[argsort])))
                 self.array_dict[key] = numpy.array([])
-
-        self.sorted = True
