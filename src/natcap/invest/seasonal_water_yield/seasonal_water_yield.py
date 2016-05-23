@@ -49,9 +49,9 @@ _OUTPUT_BASE_FILES = {
 
 _INTERMEDIATE_BASE_FILES = {
     'aet_path': 'aet.tif',
-    'aetm_path_list': ['aetm_%d.tif' % (x+1) for x in xrange(_N_MONTHS)],
+    'aetm_path_list': ['aetm_%d.tif' % (_+1) for _ in xrange(_N_MONTHS)],
     'flow_dir_path': 'flow_dir.tif',
-    'qfm_path_list': ['qf_%d.tif' % (x+1) for x in xrange(_N_MONTHS)],
+    'qfm_path_list': ['qf_%d.tif' % (_+1) for _ in xrange(_N_MONTHS)],
     'stream_path': 'stream.tif',
     'ti_path': 'ti.tif',
 }
@@ -1258,7 +1258,7 @@ def _calculate_subsidized_area(
         ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
         fill_value=TI_NODATA)
 
-    total_indexes = index_array.size / 4
+    total_indexes = index_array.size
     for sorted_indexes in array_sorter.iterarray('index_array'):
         subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
         subsidized_band = subsidized_raster.GetRasterBand(1)
@@ -1282,8 +1282,8 @@ def _calculate_subsidized_area(
         subsidized_raster.FlushCache()
         subsidized_band = None
         subsidized_raster = None
-        if total_indexes == 0:
-            break
+        #if total_indexes == 0:
+        #    break
 
 
 class _OutOfCoreNumpyArray(object):
@@ -1300,6 +1300,11 @@ class _OutOfCoreNumpyArray(object):
         # keep track of sorted files
         self.array_files_dict = collections.defaultdict(list)
 
+    def __del__(self):
+        for filename_list in self.array_files_dict.itervalues():
+            for filename in filename_list:
+                os.remove(filename)
+
     def append(self, array_dict):
         """Append array to current array."""
         first_key = array_dict.iterkeys().next()
@@ -1312,31 +1317,61 @@ class _OutOfCoreNumpyArray(object):
         for key, array in array_dict.iteritems():
             self.array_dict[key] = numpy.append(array, self.array_dict[key])
 
+    @staticmethod
+    def _read_buffer(index_filename, data_filename, chunk_size):
+        """Yield values out in sorted order of the primary key.
+
+        Parameters:
+            index_filename (string): a path to a file which contains sorted
+                indexes.
+            data_filename (string): a path to a file of binary floats the same
+                length as the file pointed to by
+                index_filename.
+            chunk_size (int): how many floats to read from the file at once.
+
+        Yields:
+            an  (index, value) tuple, where the index can be used to
+            globally sort the order in which value should appear.
+        """
+        current_seek_location = 0
+        buffer_size = chunk_size * 4
+        while True:
+            data_file = open(data_filename, 'rb')
+            data_file.seek(current_seek_location, 0)
+            data_buffer = data_file.read(buffer_size)
+            data_file.close()
+
+            index_file = open(index_filename, 'rb')
+            index_file.seek(current_seek_location, 0)
+            index_buffer = index_file.read(buffer_size)
+            index_file.close()
+            if data_buffer == '':
+                break
+            current_seek_location += len(data_buffer)
+            for (index, value) in zip(
+                    struct.unpack('f'*(len(index_buffer) / 4), index_buffer),
+                    struct.unpack('f'*(len(data_buffer) / 4), data_buffer)):
+                # yield a tuple so that the first index is the order
+                yield (index, value)
+
     def iterarray(self, key):
         """Iterate over a keyed array in memory chunks."""
         self._sort()
         chunk_size = 1000
 
-        def _read_buffer(filename):
-            current_seek_location = 0
-            buffer_size = chunk_size * 4
-            while True:
-                in_file = open(filename, 'rb')
-                in_file.seek(current_seek_location, 0)
-                data = in_file.read(buffer_size)
-                in_file.close()
-                if data == '':
-                    break
-                current_seek_location += len(data)
-                for value in struct.unpack('f'*(len(data)/4), data):
-                    yield value
-
         array_iterator = heapq.merge(*[
-            _read_buffer(filename) for filename in
-            self.array_files_dict[key]])
+            _OutOfCoreNumpyArray._read_buffer(
+                index_filename, data_filename, chunk_size)
+            for index_filename, data_filename in zip(
+                self.array_files_dict[self.primary_key],
+                self.array_files_dict[key])])
         while True:
+            # this selects the second value from the iterator which is the
+            # value, not the sorted index
             array = numpy.array(
-                tuple(itertools.islice(array_iterator, chunk_size)))
+                tuple(
+                    [_[1] for _ in itertools.islice(
+                        array_iterator, chunk_size)]))
             if len(array) > 0:
                 yield array
             else:
@@ -1350,9 +1385,16 @@ class _OutOfCoreNumpyArray(object):
         argsort = numpy.argsort(-self.array_dict[self.primary_key])
 
         for key, array in self.array_dict.iteritems():
+            # this section ensures that the primary key is storted as it is
+            # sorted with a negative above
+            if key == self.primary_key:
+                scale = -1.0
+            else:
+                scale = 1.0
             file_path = os.path.join(self.working_dir, str(uuid.uuid4()))
             self.array_files_dict[key].append(file_path)
             with open(file_path, 'wb') as out_file:
                 # This sorts and writes the file array in one step
-                out_file.write(struct.pack('f'*len(array), *(array[argsort])))
+                out_file.write(
+                    struct.pack('f'*len(array), *(scale * array[argsort])))
                 self.array_dict[key] = numpy.array([])
