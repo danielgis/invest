@@ -87,6 +87,8 @@ _TMP_BASE_FILES = {
     'subsidized_out_path_list': [
         'subsidized_%d.tif' % x for x in xrange(_N_MONTHS)],
     'temporary_subwatershed_path': 'temporary_subwatershed.shp',
+    'l1_upstream_path_list': [
+        'l1_upstream_sum_%d.tif' % x for x in xrange(_N_MONTHS)],
     }
 
 ROOT_DEPTH_NODATA = -1.0
@@ -397,7 +399,6 @@ def _execute(args):
             file_registry['l1_path_list'][month_index]
             )
 
-
     LOGGER.info('flow direction')
     pygeoprocessing.routing.flow_direction_d_inf(
         file_registry['dem_valid_path'],
@@ -427,8 +428,16 @@ def _execute(args):
     LOGGER.info("calculate subsidized area")
     for month_index in xrange(_N_MONTHS):
         LOGGER.info("For month %d: ", month_index)
+
+        _calculate_upstream_flow(
+            file_registry['flow_dir_path'],
+            file_registry['dem_valid_path'],
+            file_registry['l1_path_list'][month_index],
+            file_registry['l1_upstream_path_list'][month_index],
+            args['aoi_path'])
         _calculate_subsidized_area(
             file_registry['l1_path_list'][month_index],
+            file_registry['l1_upstream_path_list'][month_index],
             file_registry['pet_path_aligned_list'][month_index],
             file_registry['ti_path'], args['aoi_path'],
             file_registry['temporary_subwatershed_path'],
@@ -1208,12 +1217,13 @@ def _calculate_ti(
 
 
 def _calculate_subsidized_area(
-        l1_path, pet_path, ti_path, subwatershed_path,
+        l1_path, l1_upstream_sum_path, pet_path, ti_path, subwatershed_path,
         temporary_subwatershed_path, subsidized_out_path):
     """Calculated subsidized area such that Eq. 4 is balanced.
 
     Parameters:
         l1_path (string): path to flow raster for upland regions.
+        l1_upstream_sum_path (string): path to sum of L1 values upstream.
         pet_path (string): path to PET raster to use as a -1 * for flow
             raster for subsidized regions.
         ti_path (string): path to topographical index raster.
@@ -1452,3 +1462,34 @@ class _OutOfCoreNumpyArray(object):
                 out_file.write(
                     struct.pack('f'*len(array), *(scale * array[argsort])))
                 self.array_dict[key] = numpy.array([])
+
+
+def _calculate_upstream_flow(
+        flow_direction_path, dem_path, source_path, aoi_path,
+        out_upstream_source_path):
+    """Calculate upstream flow of source to pixel.
+
+    Parameters:
+        flow_direction_path (string): path to a raster that indicates the
+            d-infinity flow direction per pixel.
+        dem_path (string): path to DEM raster.
+        aoi_path (string): path to AOI vector.
+        out_upstream_source_path (string): path to output file that contains
+            the sum of upstream flow from the `flow_direction_path` raster.
+
+    Returns:
+        None.
+    """
+    zero_absorption_source_path = pygeoprocessing.temporary_filename()
+    loss_path = pygeoprocessing.temporary_filename()
+
+    pygeoprocessing.make_constant_raster_from_base_uri(
+        dem_path, 0.0, zero_absorption_source_path)
+
+    pygeoprocessing.routing.route_flux(
+        flow_direction_path, dem_path, source_path,
+        zero_absorption_source_path, loss_path, out_upstream_source_path,
+        'flux_only', aoi_uri=aoi_path, include_source=True)
+
+    os.remove(zero_absorption_source_path)
+    os.remove(loss_path)
