@@ -86,6 +86,7 @@ _TMP_BASE_FILES = {
     'cz_aligned_raster_path': 'cz_aligned.tif',
     'subsidized_out_path_list': [
         'subsidized_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'temporary_subwatershed_path': 'temporary_subwatershed.shp',
     }
 
 ROOT_DEPTH_NODATA = -1.0
@@ -97,6 +98,7 @@ CN_NODATA = -1.0
 AET_NODATA = -1.0
 L1_NODATA = -1.0
 TI_NODATA = -1.0
+
 
 def execute(args):
     """InVEST seasonal water yield model.
@@ -428,7 +430,8 @@ def _execute(args):
         _calculate_subsidized_area(
             file_registry['l1_path_list'][month_index],
             file_registry['pet_path_aligned_list'][month_index],
-            file_registry['ti_path'],
+            file_registry['ti_path'], args['aoi_path'],
+            file_registry['temporary_subwatershed_path'],
             file_registry['subsidized_out_path_list'][month_index])
     return
 
@@ -1205,7 +1208,8 @@ def _calculate_ti(
 
 
 def _calculate_subsidized_area(
-        l1_path, pet_path, ti_path, subsidized_out_path):
+        l1_path, pet_path, ti_path, subwatershed_path,
+        temporary_subwatershed_path, subsidized_out_path):
     """Calculated subsidized area such that Eq. 4 is balanced.
 
     Parameters:
@@ -1213,6 +1217,12 @@ def _calculate_subsidized_area(
         pet_path (string): path to PET raster to use as a -1 * for flow
             raster for subsidized regions.
         ti_path (string): path to topographical index raster.
+        subwatershed_path (string): path to a shapefile that defines the
+            subwatersheds.
+        temporary_subwatershed_path (string): path to a shapefile that can
+            be used to mask out subsets of the subwatershed; this file
+            will be overwritten if exists and deleted at the end of the
+            call.
         subsidized_out_path (string): path to output raster that masks out
             the subsidized region.
 
@@ -1232,58 +1242,102 @@ def _calculate_subsidized_area(
     pet_nodata = pygeoprocessing.get_nodata_from_uri(pet_path)
     ti_nodata = pygeoprocessing.get_nodata_from_uri(ti_path)
 
-    for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
-        (x_indexes, y_indexes) = numpy.meshgrid(
-            xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
-        index_array = (
-            x_indexes + block_info['xoff'] +
-            (y_indexes + block_info['yoff']) * n_cols)
-        pet_array = pet_band.ReadAsArray(**block_info)
-        l1_array = l1_band.ReadAsArray(**block_info)
-
-        valid_mask = (
-            (l1_array != l1_nodata) &
-            (pet_array != pet_nodata) &
-            (ti_array != ti_nodata))
-
-        array_sorter.append(
-            {
-                'index_array':  index_array[valid_mask],
-                'ti_array': ti_array[valid_mask],
-                'pet_array': pet_array[valid_mask],
-                'l1_array': l1_array[valid_mask],
-            })
-
     pygeoprocessing.new_raster_from_base_uri(
         ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
         fill_value=TI_NODATA)
 
-    total_indexes = index_array.size
-    for sorted_indexes in array_sorter.iterarray('index_array'):
-        subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
-        subsidized_band = subsidized_raster.GetRasterBand(1)
-        sorted_indexes = sorted_indexes[0:total_indexes]
-        total_indexes = total_indexes - sorted_indexes.size
-        for block_info, subsidized_mask_array in pygeoprocessing.iterblocks(
-                subsidized_out_path):
+    # create a temporary shapefile that can be used to rasterize each
+    # subwatershed
+    # make a shapefile that non-overlapping layers can be added to
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    if os.path.exists(temporary_subwatershed_path):
+        os.remove(temporary_subwatershed_path)
+    temporary_subwatershed_vector = driver.CreateDataSource(
+        temporary_subwatershed_path)
+    spat_ref = pygeoprocessing.get_spatial_ref_uri(subwatershed_path)
+    subset_layer = temporary_subwatershed_vector.CreateLayer(
+        'subset_layer', spat_ref, ogr.wkbPolygon)
+    subwatershed_vector = ogr.Open(subwatershed_path)
+    subwatershed_layer = subwatershed_vector.GetLayer()
+    defn = subwatershed_layer.GetLayerDefn()
+
+    # For every field, create a duplicate field and add it to the new
+    # subset_layer layer
+    defn.GetFieldCount()
+    for fld_index in range(defn.GetFieldCount()):
+        original_field = defn.GetFieldDefn(fld_index)
+        output_field = ogr.FieldDefn(
+            original_field.GetName(), original_field.GetType())
+        subset_layer.CreateField(output_field)
+
+    for feature in subwatershed_layer:
+        subset_layer.CreateFeature(feature)
+        subset_layer.SyncToDisk()
+
+        mask_path = "%s.tif" % feature.GetFID()
+        pygeoprocessing.new_raster_from_base_uri(
+            ti_path, mask_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
+            fill_value=TI_NODATA)
+        pygeoprocessing.rasterize_layer_uri(
+            mask_path, temporary_subwatershed_path, burn_values=[1])
+
+        subset_layer.DeleteFeature(feature.GetFID())
+
+        watershed_mask_raster = gdal.Open(mask_path)
+        watershed_mask_band = watershed_mask_raster.GetRasterBand(1)
+
+        for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
             (x_indexes, y_indexes) = numpy.meshgrid(
-                xrange(subsidized_mask_array.shape[1]), xrange(
-                    subsidized_mask_array.shape[0]))
+                xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
             index_array = (
                 x_indexes + block_info['xoff'] +
                 (y_indexes + block_info['yoff']) * n_cols)
-            mask = numpy.in1d(index_array, sorted_indexes).reshape(
-                index_array.shape)
-            subsidized_mask_array[mask] = 1
-            subsidized_band.WriteArray(
-                subsidized_mask_array, xoff=block_info['xoff'],
-                yoff=block_info['yoff'])
-        subsidized_band.FlushCache()
-        subsidized_raster.FlushCache()
-        subsidized_band = None
-        subsidized_raster = None
-        #if total_indexes == 0:
-        #    break
+            pet_array = pet_band.ReadAsArray(**block_info)
+            l1_array = l1_band.ReadAsArray(**block_info)
+            watershed_mask_array = watershed_mask_band.ReadAsArray(
+                **block_info)
+
+            valid_mask = (
+                (l1_array != l1_nodata) &
+                (pet_array != pet_nodata) &
+                (ti_array != ti_nodata) &
+                (watershed_mask_array != TI_NODATA))
+
+            array_sorter.append(
+                {
+                    'index_array':  index_array[valid_mask],
+                    'ti_array': ti_array[valid_mask],
+                    'pet_array': pet_array[valid_mask],
+                    'l1_array': l1_array[valid_mask],
+                })
+
+        for sorted_indexes in array_sorter.iterarray('index_array'):
+            subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
+            subsidized_band = subsidized_raster.GetRasterBand(1)
+            for block_info, subsidized_mask_array in (
+                    pygeoprocessing.iterblocks(subsidized_out_path)):
+                (x_indexes, y_indexes) = numpy.meshgrid(
+                    xrange(subsidized_mask_array.shape[1]),
+                    xrange(subsidized_mask_array.shape[0]))
+                index_array = (
+                    x_indexes + block_info['xoff'] +
+                    (y_indexes + block_info['yoff']) * n_cols)
+                mask = numpy.in1d(index_array, sorted_indexes).reshape(
+                    index_array.shape)
+                subsidized_mask_array[mask] = 1
+                subsidized_band.WriteArray(
+                    subsidized_mask_array, xoff=block_info['xoff'],
+                    yoff=block_info['yoff'])
+            subsidized_band.FlushCache()
+            subsidized_raster.FlushCache()
+            subsidized_band = None
+            subsidized_raster = None
+
+        LOGGER.error(
+            "breaking because we don't handle overlapping watersheds")
+        break
+
+    return
 
 
 class _OutOfCoreNumpyArray(object):
