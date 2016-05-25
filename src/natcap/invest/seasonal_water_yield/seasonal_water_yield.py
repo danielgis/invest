@@ -1248,7 +1248,12 @@ def _calculate_subsidized_area(
     l1_band = l1_raster.GetRasterBand(1)
     pet_band = pet_raster.GetRasterBand(1)
 
+    l1_upstream_raster = gdal.Open(l1_upstream_sum_path)
+    l1_upstream_band = l1_upstream_raster.GetRasterBand(1)
+
     l1_nodata = pygeoprocessing.get_nodata_from_uri(l1_path)
+    l1_upstream_nodata = pygeoprocessing.get_nodata_from_uri(
+        l1_upstream_sum_path)
     pet_nodata = pygeoprocessing.get_nodata_from_uri(pet_path)
     ti_nodata = pygeoprocessing.get_nodata_from_uri(ti_path)
 
@@ -1306,12 +1311,16 @@ def _calculate_subsidized_area(
             l1_array = l1_band.ReadAsArray(**block_info)
             watershed_mask_array = watershed_mask_band.ReadAsArray(
                 **block_info)
+            l1_upstream_array = l1_upstream_band.ReadAsArray(
+                **block_info)
 
             valid_mask = (
                 (l1_array != l1_nodata) &
                 (pet_array != pet_nodata) &
                 (ti_array != ti_nodata) &
-                (watershed_mask_array != TI_NODATA))
+                (watershed_mask_array != TI_NODATA) &
+                (l1_upstream_array != l1_upstream_nodata) &
+                (l1_upstream_array > pet_array))
 
             array_sorter.append(
                 {
