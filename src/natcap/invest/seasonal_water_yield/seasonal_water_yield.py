@@ -340,7 +340,7 @@ def _execute(args):
         (lucode, biophysical_table[lucode]['root_depth'])
         for lucode in biophysical_table])
     pygeoprocessing.reclassify_dataset_uri(
-        file_registry['lulc_aligned_path'], root_depth_lookup,
+        file_registry['lulc_valid_path'], root_depth_lookup,
         file_registry['root_depth_path'], gdal.GDT_Float32, ROOT_DEPTH_NODATA,
         exception_flag='values_required', assert_dataset_projected=True)
 
@@ -433,8 +433,8 @@ def _execute(args):
             file_registry['flow_dir_path'],
             file_registry['dem_valid_path'],
             file_registry['l1_path_list'][month_index],
-            file_registry['l1_upstream_path_list'][month_index],
-            args['aoi_path'])
+            args['aoi_path'],
+            file_registry['l1_upstream_path_list'][month_index])
         _calculate_subsidized_area(
             file_registry['l1_path_list'][month_index],
             file_registry['l1_upstream_path_list'][month_index],
