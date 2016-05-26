@@ -215,6 +215,24 @@ def _execute(args):
             pygeoprocessing.get_lookup_from_table(
                 args['rain_events_table_path'], 'month'))
 
+    # fail early if the AOI is not a single polygon
+    aoi_vector = ogr.Open(args['aoi_path'])
+    aoi_n_layers = aoi_vector.GetLayerCount()
+    if aoi_n_layers != 1:
+        raise ValueError(
+            "Expected one AOI layer but got %d" % aoi_n_layers)
+    aoi_layer = aoi_vector.GetLayer()
+    aoi_geom_type = aoi_layer.GetGeomType()
+    if aoi_geom_type not in [ogr.wkbMultiPolygon, ogr.wkbPolygon]:
+        raise ValueError(
+            "Expected an AOI polygon type, but got %d" % aoi_geom_type)
+    n_features = aoi_layer.GetFeatureCount()
+    if n_features != 1:
+        raise ValueError(
+            "Expected 1 polygon in AOI layer but got %d" % n_features)
+    aoi_layer = None
+    aoi_vector = None
+
     biophysical_table = pygeoprocessing.get_lookup_from_table(
         args['biophysical_table_path'], 'lucode')
 
@@ -1288,6 +1306,14 @@ def _calculate_subsidized_area(
     for feature in subwatershed_layer:
         subset_layer.CreateFeature(feature)
         subset_layer.SyncToDisk()
+
+        l1_sum = pygeoprocessing.aggregate_raster_values_uri(
+            l1_path, subwatershed_path).total[9999]
+        l2_sum = -pygeoprocessing.aggregate_raster_values_uri(
+            pet_path, subwatershed_path).total[9999]
+
+        LOGGER.debug(l1_sum)
+        LOGGER.debug(l2_sum)
 
         mask_path = "%s.tif" % feature.GetFID()
         pygeoprocessing.new_raster_from_base_uri(
