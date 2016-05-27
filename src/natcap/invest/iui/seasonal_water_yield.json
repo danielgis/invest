@@ -43,6 +43,16 @@
           "helpText": "The number of upstream cells that must flow into a cell before it's considered part of a stream such that retention stops and the remaining export is exported to the stream. Used to define streams from the DEM."
         },
         {
+          "id": "qb_value",
+          "args_id": "qb_value",
+          "type": "text",
+          "label": "Qb",
+          "defaultValue": "111.0",
+          "required": true,
+          "validText": "^[-+]?[0-9]+\\.?[0-9]*$",
+          "helpText": "Qb."
+        },
+        {
           "id": "et0_dir",
           "args_id": "et0_dir",
           "type": "folder",
@@ -83,6 +93,18 @@
             "type": "GDAL"
           },
           "helpText": "A GDAL-supported raster file with an elevation value for each cell. Make sure the DEM is corrected by filling in sinks, and if necessary burning hydrographic features into the elevation model (recommended when unusual streams are observed.) See the 'Working with the DEM' section of the InVEST User's Guide for more information."
+        },
+        {
+          "id": "soil_depth_raster_path",
+          "args_id": "soil_depth_raster_path",
+          "type": "file",
+          "label": "Soil Depth (Raster)",
+          "defaultValue": "../seasonal_water_yield/soil_depth.tif",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          },
+          "helpText": "A GDAL-supported raster file with the soil depth in mm for each cell."
         },
         {
           "id": "lulc_raster_path",
