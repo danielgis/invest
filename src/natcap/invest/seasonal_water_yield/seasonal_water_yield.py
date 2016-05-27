@@ -36,12 +36,10 @@ MONTH_ID_TO_LABEL = [
 _OUTPUT_BASE_FILES = {
     'aggregate_vector_path': 'aggregated_results.shp',
     'annual_precip_path': 'P.tif',
-    'cn_path': 'CN.tif',
     'l_avail_path': 'L_avail.tif',
     'l_path': 'L.tif',
     'l_sum_path': 'L_sum.tif',
     'l_sum_avail_path': 'L_sum_avail.tif',
-    'qf_path': 'QF.tif',
     'b_sum_path': 'B_sum.tif',
     'b_path': 'B.tif',
     'vri_path': 'Vri.tif',
@@ -51,7 +49,6 @@ _INTERMEDIATE_BASE_FILES = {
     'aet_path': 'aet.tif',
     'aetm_path_list': ['aetm_%d.tif' % (_+1) for _ in xrange(_N_MONTHS)],
     'flow_dir_path': 'flow_dir.tif',
-    'qfm_path_list': ['qf_%d.tif' % (_+1) for _ in xrange(_N_MONTHS)],
     'stream_path': 'stream.tif',
     'ti_path': 'ti.tif',
 }
@@ -59,7 +56,6 @@ _INTERMEDIATE_BASE_FILES = {
 _TMP_BASE_FILES = {
     'outflow_direction_path': 'outflow_direction.tif',
     'outflow_weights_path': 'outflow_weights.tif',
-    'si_path': 'Si.tif',
     'lulc_aligned_path': 'lulc_aligned.tif',
     'dem_aligned_path': 'dem_aligned.tif',
     'lulc_valid_path': 'lulc_valid.tif',
@@ -68,12 +64,12 @@ _TMP_BASE_FILES = {
     'loss_path': 'loss.tif',
     'soil_depth_aligned_path': 'soil_depth.tif',
     'zero_absorption_source_path': 'zero_absorption.tif',
-    'soil_group_aligned_path': 'soil_group_aligned.tif',
-    'soil_group_valid_path': 'soil_group_valid.tif',
     'flow_accum_path': 'flow_accum.tif',
     'root_depth_path': 'root_depth.tif',
     'precip_path_aligned_list': [
         'prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
+    'valid_precip_path_list':  [
+        'valid_prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
     'n_events_path_list': ['n_events_%d.tif' % x for x in xrange(_N_MONTHS)],
     'et0_path_aligned_list': ['et0_a_%d.tif' % x for x in xrange(_N_MONTHS)],
     'pet_path_aligned_list': ['pet_%d.tif' % x for x in xrange(_N_MONTHS)],
@@ -82,9 +78,9 @@ _TMP_BASE_FILES = {
     'pawc_aligned_path': 'pawc_aligned.tif',
     'wm_path_list': ['wm_%d.tif' % x for x in xrange(_N_MONTHS)],
     'l1_path_list': ['l1_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'l_aligned_path': 'l_aligned.tif',
+    'l2_path_list': ['l2_%d.tif' % x for x in xrange(_N_MONTHS)],
     'cz_aligned_raster_path': 'cz_aligned.tif',
-    'subsidized_out_path_list': [
+    'subsidized_path_list': [
         'subsidized_%d.tif' % x for x in xrange(_N_MONTHS)],
     'temporary_subwatershed_path': 'temporary_subwatershed.shp',
     'l1_upstream_path_list': [
@@ -119,14 +115,10 @@ def execute(args):
             stream pixels from the DEM by thresholding the number of upstream
             cells that must flow into a cell before it's considered
             part of a stream.
-        args['et0_dir'] (string): required if
-            args['user_defined_local_recharge'] is False.  Path to a directory
-            that contains rasters of monthly reference evapotranspiration;
-            units in mm.
-        args['precip_dir'] (string): required if
-            args['user_defined_local_recharge'] is False. A path to a
-            directory that contains rasters of monthly precipitation; units in
-            mm.
+        args['et0_dir'] (string): Path to a directory that contains rasters of
+            monthly reference evapotranspiration; units in mm.
+        args['precip_dir'] (string): Path to a directory that contains rasters
+            of monthly precipitation; units in mm.
         args['dem_raster_path'] (string): a path to a digital elevation
             raster.
         args['pawc_raster_path'] (string): a path to the plant available water
@@ -134,56 +126,16 @@ def execute(args):
             available water content as a fraction between 0 and 1.
         args['lulc_raster_path'] (string): a path to a land cover raster used
             to classify biophysical properties of pixels.
-        args['soil_group_path'] (string): required if
-            args['user_defined_local_recharge'] is  False. A path to a raster
-            indicating SCS soil groups where integer values are mapped to soil
-            types:
-                1: A
-                2: B
-                3: C
-                4: D
         args['soil_depth_raster_path'] (string): path to raster that indicates
             soil depth per pixel in mm.
         args['aoi_path'] (string): path to a vector that indicates the area
             over which the model should be run, as well as the area in which
             to aggregate over when calculating the output Qb.
         args['biophysical_table_path'] (string): path to a CSV table that maps
-            landcover codes paired with soil group types to curve numbers as
-            well as Kc values.  Headers must include 'lucode', 'CN_A', 'CN_B',
-            'CN_C', 'CN_D', 'Kc_1', 'Kc_2', 'Kc_3', 'Kc_4', 'Kc_5', 'Kc_6',
-            'Kc_7', 'Kc_8', 'Kc_9', 'Kc_10', 'Kc_11', 'Kc_12'.
-        args['rain_events_table_path'] (string): Not required if
-            args['user_defined_local_recharge'] is True or
-            args['user_defined_climate_zones'] is True.  Path to a CSV table
-            that has headers 'month' (1-12) and 'events' (int >= 0) that
-            indicates the number of rain events per month
-        args['alpha_m'] (float or string): required if args['monthly_alpha']
-            is false.  Is the proportion of upslope annual available local
-            recharge that is available in month m.
-        args['beta_i'] (float or string): is the fraction of the upgradient
-            subsidy that is available for downgradient evapotranspiration.
-        args['gamma'] (float or string): is the fraction of pixel local
-            recharge that is available to downgradient pixels.
-        args['user_defined_local_recharge'] (boolean): if True, indicates user
-            will provide pre-defined local recharge raster layer
-        args['l_path'] (string): required if
-            args['user_defined_local_recharge'] is True.  If provided pixels
-            indicate the amount of local recharge; units in mm.
-        args['user_defined_climate_zones'] (boolean): if True, user provides
-            a climate zone rain events table and a climate zone raster map in
-            lieu of a global rain events table.
-        args['climate_zone_table_path'] (string): required if
-            args['user_defined_climate_zones'] is True. Contains monthly
-            precipitation events per climate zone.  Fields must be:
-            "cz_id", "jan", "feb", "mar", "apr", "may", "jun", "jul",
-            "aug", "sep", "oct", "nov", "dec".
-        args['climate_zone_raster_path'] (string): required if
-            args['user_defined_climate_zones'] is True, pixel values
-            correspond to the "cz_id" values defined in
-            args['climate_zone_table_path']
-        args['monthly_alpha'] (boolean): if True, use the alpha
-        args['monthly_alpha_path'] (string): required if args['monthly_alpha']
-            is True.
+            landcover codes to monthly Kc values. Headers must include
+            'lucode', 'Kc_1', 'Kc_2', 'Kc_3', 'Kc_4', 'Kc_5', 'Kc_6', 'Kc_7',
+            'Kc_8', 'Kc_9', 'Kc_10', 'Kc_11', 'Kc_12'.
+        args['qb_value'] (string/float): value for Qb for the watershed.
     """
     # This upgrades warnings to exceptions across this model.
     # I found this useful to catch all kinds of weird inputs to the model
@@ -208,13 +160,6 @@ def _execute(args):
     """
     LOGGER.info('prepare and test inputs for common errors')
 
-    # fail early on a missing required rain events table
-    if (not args['user_defined_local_recharge'] and
-            not args['user_defined_climate_zones']):
-        rain_events_lookup = (
-            pygeoprocessing.get_lookup_from_table(
-                args['rain_events_table_path'], 'month'))
-
     # fail early if the AOI is not a single polygon
     aoi_vector = ogr.Open(args['aoi_path'])
     aoi_n_layers = aoi_vector.GetLayerCount()
@@ -233,24 +178,21 @@ def _execute(args):
     aoi_layer = None
     aoi_vector = None
 
+    # fail early if the climate zone table has more than 1 row but no raster
+    cz_rain_events_lookup = (
+        pygeoprocessing.get_lookup_from_table(
+            args['climate_zone_table_path'], 'cz_id'))
+    if ('climate_zone_raster_path' not in args and
+            len(cz_rain_events_lookup) != 1):
+        raise ValueError(
+            "No climate zone raster was defined, but %d climate zones "
+            "were defined in the table." % len(cz_rain_events_lookup))
+
     biophysical_table = pygeoprocessing.get_lookup_from_table(
         args['biophysical_table_path'], 'lucode')
 
-    if args['monthly_alpha']:
-        # parse out the alpha lookup table of the form (month_id: alpha_val)
-        alpha_month = dict(
-            (key, val['alpha']) for key, val in
-            pygeoprocessing.get_lookup_from_table(
-                args['monthly_alpha_path'], 'month').iteritems())
-    else:
-        # make all 12 entries equal to args['alpha_m']
-        alpha_m = float(fractions.Fraction(args['alpha_m']))
-        alpha_month = dict(
-            (month_index+1, alpha_m) for month_index in xrange(12))
-
-    beta_i = float(fractions.Fraction(args['beta_i']))
-    gamma = float(fractions.Fraction(args['gamma']))
     threshold_flow_accumulation = float(args['threshold_flow_accumulation'])
+    qb_value = float(args['qb_value'])
     pixel_size = pygeoprocessing.get_cell_size_from_uri(
         args['dem_raster_path'])
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
@@ -287,50 +229,43 @@ def _execute(args):
         file_registry['pawc_aligned_path'],
         file_registry['soil_depth_aligned_path']]
 
-    if not args['user_defined_local_recharge']:
-        precip_path_list = []
-        et0_path_list = []
+    if 'climate_zone_raster_path' in args:
+        input_align_list.append(args['climate_zone_raster_path'])
+        output_align_list.append(file_registry['cz_aligned_raster_path'])
 
-        et0_dir_list = [
-            os.path.join(args['et0_dir'], f) for f in os.listdir(
-                args['et0_dir'])]
-        precip_dir_list = [
-            os.path.join(args['precip_dir'], f) for f in os.listdir(
-                args['precip_dir'])]
+    precip_path_list = []
+    et0_path_list = []
 
-        for month_index in range(1, _N_MONTHS + 1):
-            month_file_match = re.compile(r'.*[^\d]%d\.[^.]+$' % month_index)
-            for data_type, dir_list, path_list in [
-                    ('et0', et0_dir_list, et0_path_list),
-                    ('Precip', precip_dir_list, precip_path_list)]:
-                file_list = [
-                    month_file_path for month_file_path in dir_list
-                    if month_file_match.match(month_file_path)]
-                if len(file_list) == 0:
-                    raise ValueError(
-                        "No %s found for month %d" % (data_type, month_index))
-                if len(file_list) > 1:
-                    raise ValueError(
-                        "Ambiguous set of files found for month %d: %s" %
-                        (month_index, file_list))
-                path_list.append(file_list[0])
+    et0_dir_list = [
+        os.path.join(args['et0_dir'], f) for f in os.listdir(
+            args['et0_dir'])]
+    precip_dir_list = [
+        os.path.join(args['precip_dir'], f) for f in os.listdir(
+            args['precip_dir'])]
 
-        input_align_list = (
-            precip_path_list + [args['soil_group_path']] + et0_path_list +
-            input_align_list)
-        output_align_list = (
-            file_registry['precip_path_aligned_list'] +
-            [file_registry['soil_group_aligned_path']] +
-            file_registry['et0_path_aligned_list'] + output_align_list)
+    for month_index in range(1, _N_MONTHS + 1):
+        month_file_match = re.compile(r'.*[^\d]%d\.[^.]+$' % month_index)
+        for data_type, dir_list, path_list in [
+                ('et0', et0_dir_list, et0_path_list),
+                ('Precip', precip_dir_list, precip_path_list)]:
+            file_list = [
+                month_file_path for month_file_path in dir_list
+                if month_file_match.match(month_file_path)]
+            if len(file_list) == 0:
+                raise ValueError(
+                    "No %s found for month %d" % (data_type, month_index))
+            if len(file_list) > 1:
+                raise ValueError(
+                    "Ambiguous set of files found for month %d: %s" %
+                    (month_index, file_list))
+            path_list.append(file_list[0])
+
+    input_align_list = precip_path_list + et0_path_list + input_align_list
+    output_align_list = (
+        file_registry['precip_path_aligned_list'] +
+        file_registry['et0_path_aligned_list'] + output_align_list)
 
     align_index = len(input_align_list) - 1  # this aligns with the DEM
-    if args['user_defined_local_recharge']:
-        input_align_list.append(args['l_path'])
-        output_align_list.append(file_registry['l_aligned_path'])
-    elif args['user_defined_climate_zones']:
-        input_align_list.append(args['climate_zone_raster_path'])
-        output_align_list.append(
-            file_registry['cz_aligned_raster_path'])
     interpolate_list = ['nearest'] * len(input_align_list)
 
     pygeoprocessing.align_dataset_list(
@@ -338,19 +273,31 @@ def _execute(args):
         'intersection', align_index, aoi_uri=args['aoi_path'],
         assert_datasets_projected=True)
 
+    if 'climate_zone_raster_path' not in args:
+        # Create a constant climate zone raster, there is only one entry so
+        # use that CZ id for the fill value in the raster
+        climate_zone_id = cz_rain_events_lookup.keys()[0]
+        # this if statement makes sure we don't overflow
+        if climate_zone_id > 0:
+            climate_zone_nodata = climate_zone_id - 1
+        else:
+            climate_zone_nodata = climate_zone_id + 1
+        pygeoprocessing.new_raster_from_base_uri(
+            file_registry['dem_aligned_path'],
+            file_registry['cz_aligned_raster_path'], 'GTiff',
+            climate_zone_nodata, gdal.GDT_Int32, fill_value=climate_zone_id)
+
     # sometimes users input data where the DEM is defined in places where the
     # land cover isn't, mask those out
     LOGGER.info("Masking invalid lulc, dem, and possible soil group overlap")
     input_raster_path_list = [
         file_registry['dem_aligned_path'],
-        file_registry['lulc_aligned_path']]
+        file_registry['lulc_aligned_path']] + (
+            file_registry['precip_path_aligned_list'])
     output_valid_raster_path_list = [
         file_registry['dem_valid_path'],
-        file_registry['lulc_valid_path']]
-    if not args['user_defined_local_recharge']:
-        input_raster_path_list.append(file_registry['soil_group_aligned_path'])
-        output_valid_raster_path_list.append(
-            file_registry['soil_group_valid_path'])
+        file_registry['lulc_valid_path']] + (
+            file_registry['valid_precip_path_list'])
     _mask_any_nodata(input_raster_path_list, output_valid_raster_path_list)
 
     LOGGER.info('Mapping LULC to root depth')
@@ -373,31 +320,19 @@ def _execute(args):
             file_registry['kc_path_list'][month_index], gdal.GDT_Float32,
             KC_NODATA)
 
-    # user didn't predefine local recharge so calculate it
     LOGGER.info('loading number of monthly events')
-    for month_id in xrange(_N_MONTHS):
-        if args['user_defined_climate_zones']:
-            cz_rain_events_lookup = (
-                pygeoprocessing.get_lookup_from_table(
-                    args['climate_zone_table_path'], 'cz_id'))
-            month_label = MONTH_ID_TO_LABEL[month_id]
-            climate_zone_rain_events_month = dict([
-                (cz_id, cz_rain_events_lookup[cz_id][month_label]) for
-                cz_id in cz_rain_events_lookup])
-            pygeoprocessing.reclassify_dataset_uri(
-                file_registry['cz_aligned_raster_path'],
-                climate_zone_rain_events_month,
-                file_registry['n_events_path_list'][month_id],
-                gdal.GDT_Float32, N_EVENTS_NODATA)
-        else:
-            # rain_events_lookup defined near entry point of execute
-            n_events = rain_events_lookup[month_id+1]['events']
-            pygeoprocessing.make_constant_raster_from_base_uri(
-                file_registry['dem_valid_path'], n_events,
-                file_registry['n_events_path_list'][month_id])
-
     for month_index in xrange(_N_MONTHS):
         LOGGER.info("For month %d: ", month_index)
+        month_label = MONTH_ID_TO_LABEL[month_index]
+        climate_zone_rain_events_month = dict([
+            (cz_id, cz_rain_events_lookup[cz_id][month_label]) for
+            cz_id in cz_rain_events_lookup])
+        pygeoprocessing.reclassify_dataset_uri(
+            file_registry['cz_aligned_raster_path'],
+            climate_zone_rain_events_month,
+            file_registry['n_events_path_list'][month_index],
+            gdal.GDT_Float32, N_EVENTS_NODATA)
+
         _calculate_aet_uphill(
             file_registry['precip_path_aligned_list'][month_index],
             file_registry['kc_path_list'][month_index],
@@ -459,7 +394,12 @@ def _execute(args):
             file_registry['pet_path_aligned_list'][month_index],
             file_registry['ti_path'], args['aoi_path'],
             file_registry['temporary_subwatershed_path'],
-            file_registry['subsidized_out_path_list'][month_index])
+            file_registry['subsidized_path_list'][month_index])
+        _calculate_l(
+            file_registry['l1_path_list'][month_index],
+            file_registry['l2_path_list'][month_index],
+            file_registry['subsidized_path_list'][month_index],
+            file_registry['l_path_list'][month_index])
     return
 
 
@@ -470,47 +410,27 @@ def _execute(args):
         file_registry['stream_path'])
 
     LOGGER.info('quick flow')
-    if args['user_defined_local_recharge']:
-        file_registry['l_path'] = file_registry['l_aligned_path']
-        l_nodata = pygeoprocessing.get_nodata_from_uri(file_registry['l_path'])
-
-        def l_avail_op(l_array):
-            """Calculate equation [8] L_avail = max(gamma*L, 0)."""
-            result = numpy.empty(l_array.shape)
-            result[:] = l_nodata
-            valid_mask = (l_array != l_nodata)
-            valid_l_array = l_array[valid_mask]
-            valid_l_array[valid_l_array < 0.0] = 0.0
-            result[valid_mask] = valid_l_array * gamma
-            return result
-        pygeoprocessing.vectorize_datasets(
-            [file_registry['l_path']], l_avail_op,
-            file_registry['l_avail_path'], gdal.GDT_Float32, l_nodata,
-            pixel_size, 'intersection', vectorize_op=False,
-            datasets_are_pre_aligned=True)
-    else:
-        # user didn't predefine local recharge so calculate it
-        LOGGER.info('loading number of monthly events')
-        for month_id in xrange(_N_MONTHS):
-            if args['user_defined_climate_zones']:
-                cz_rain_events_lookup = (
-                    pygeoprocessing.get_lookup_from_table(
-                        args['climate_zone_table_path'], 'cz_id'))
-                month_label = MONTH_ID_TO_LABEL[month_id]
-                climate_zone_rain_events_month = dict([
-                    (cz_id, cz_rain_events_lookup[cz_id][month_label]) for
-                    cz_id in cz_rain_events_lookup])
-                pygeoprocessing.reclassify_dataset_uri(
-                    file_registry['cz_aligned_raster_path'],
-                    climate_zone_rain_events_month,
-                    file_registry['n_events_path_list'][month_id],
-                    gdal.GDT_Float32, N_EVENTS_NODATA)
-            else:
-                # rain_events_lookup defined near entry point of execute
-                n_events = rain_events_lookup[month_id+1]['events']
-                pygeoprocessing.make_constant_raster_from_base_uri(
-                    file_registry['dem_valid_path'], n_events,
-                    file_registry['n_events_path_list'][month_id])
+    LOGGER.info('loading number of monthly events')
+    for month_id in xrange(_N_MONTHS):
+        if args['user_defined_climate_zones']:
+            cz_rain_events_lookup = (
+                pygeoprocessing.get_lookup_from_table(
+                    args['climate_zone_table_path'], 'cz_id'))
+            month_label = MONTH_ID_TO_LABEL[month_id]
+            climate_zone_rain_events_month = dict([
+                (cz_id, cz_rain_events_lookup[cz_id][month_label]) for
+                cz_id in cz_rain_events_lookup])
+            pygeoprocessing.reclassify_dataset_uri(
+                file_registry['cz_aligned_raster_path'],
+                climate_zone_rain_events_month,
+                file_registry['n_events_path_list'][month_id],
+                gdal.GDT_Float32, N_EVENTS_NODATA)
+        else:
+            # rain_events_lookup defined near entry point of execute
+            n_events = rain_events_lookup[month_id+1]['events']
+            pygeoprocessing.make_constant_raster_from_base_uri(
+                file_registry['dem_valid_path'], n_events,
+                file_registry['n_events_path_list'][month_id])
 
         LOGGER.info('calculate curve number')
         _calculate_curve_number_raster(
@@ -1235,8 +1155,8 @@ def _calculate_ti(
 
 
 def _calculate_subsidized_area(
-        l1_path, l1_upstream_sum_path, pet_path, ti_path, subwatershed_path,
-        temporary_subwatershed_path, subsidized_out_path):
+        l1_path, l1_upstream_sum_path, pet_path, ti_path, watershed_path,
+        subsidized_out_path):
     """Calculated subsidized area such that Eq. 4 is balanced.
 
     Parameters:
@@ -1245,12 +1165,8 @@ def _calculate_subsidized_area(
         pet_path (string): path to PET raster to use as a -1 * for flow
             raster for subsidized regions.
         ti_path (string): path to topographical index raster.
-        subwatershed_path (string): path to a shapefile that defines the
-            subwatersheds.
-        temporary_subwatershed_path (string): path to a shapefile that can
-            be used to mask out subsets of the subwatershed; this file
-            will be overwritten if exists and deleted at the end of the
-            call.
+        watershed_path (string): path to a shapefile that defines the
+            watersheds.
         subsidized_out_path (string): path to output raster that masks out
             the subsidized region.
 
@@ -1279,110 +1195,61 @@ def _calculate_subsidized_area(
         ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
         fill_value=TI_NODATA)
 
-    # create a temporary shapefile that can be used to rasterize each
-    # subwatershed
-    # make a shapefile that non-overlapping layers can be added to
-    driver = ogr.GetDriverByName('ESRI Shapefile')
-    if os.path.exists(temporary_subwatershed_path):
-        os.remove(temporary_subwatershed_path)
-    temporary_subwatershed_vector = driver.CreateDataSource(
-        temporary_subwatershed_path)
-    spat_ref = pygeoprocessing.get_spatial_ref_uri(subwatershed_path)
-    subset_layer = temporary_subwatershed_vector.CreateLayer(
-        'subset_layer', spat_ref, ogr.wkbPolygon)
-    subwatershed_vector = ogr.Open(subwatershed_path)
-    subwatershed_layer = subwatershed_vector.GetLayer()
-    defn = subwatershed_layer.GetLayerDefn()
+    l1_sum = pygeoprocessing.aggregate_raster_values_uri(
+        l1_path, watershed_path).total[9999]
+    l2_sum = -pygeoprocessing.aggregate_raster_values_uri(
+        pet_path, watershed_path).total[9999]
 
-    # For every field, create a duplicate field and add it to the new
-    # subset_layer layer
-    defn.GetFieldCount()
-    for fld_index in range(defn.GetFieldCount()):
-        original_field = defn.GetFieldDefn(fld_index)
-        output_field = ogr.FieldDefn(
-            original_field.GetName(), original_field.GetType())
-        subset_layer.CreateField(output_field)
+    LOGGER.debug(l1_sum)
+    LOGGER.debug(l2_sum)
 
-    for feature in subwatershed_layer:
-        subset_layer.CreateFeature(feature)
-        subset_layer.SyncToDisk()
+    for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
+        (x_indexes, y_indexes) = numpy.meshgrid(
+            xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
+        index_array = (
+            x_indexes + block_info['xoff'] +
+            (y_indexes + block_info['yoff']) * n_cols)
+        pet_array = pet_band.ReadAsArray(**block_info)
+        l1_array = l1_band.ReadAsArray(**block_info)
+        l1_upstream_array = l1_upstream_band.ReadAsArray(
+            **block_info)
 
-        l1_sum = pygeoprocessing.aggregate_raster_values_uri(
-            l1_path, subwatershed_path).total[9999]
-        l2_sum = -pygeoprocessing.aggregate_raster_values_uri(
-            pet_path, subwatershed_path).total[9999]
+        valid_mask = (
+            (l1_array != l1_nodata) &
+            (pet_array != pet_nodata) &
+            (ti_array != ti_nodata) &
+            (l1_upstream_array != l1_upstream_nodata) &
+            (l1_upstream_array > pet_array))
 
-        LOGGER.debug(l1_sum)
-        LOGGER.debug(l2_sum)
+        array_sorter.append(
+            {
+                'index_array':  index_array[valid_mask],
+                'ti_array': ti_array[valid_mask],
+                'pet_array': pet_array[valid_mask],
+                'l1_array': l1_array[valid_mask],
+            })
 
-        mask_path = "%s.tif" % feature.GetFID()
-        pygeoprocessing.new_raster_from_base_uri(
-            ti_path, mask_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
-            fill_value=TI_NODATA)
-        pygeoprocessing.rasterize_layer_uri(
-            mask_path, temporary_subwatershed_path, burn_values=[1])
-
-        subset_layer.DeleteFeature(feature.GetFID())
-
-        watershed_mask_raster = gdal.Open(mask_path)
-        watershed_mask_band = watershed_mask_raster.GetRasterBand(1)
-
-        for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
+    for sorted_indexes in array_sorter.iterarray('index_array'):
+        subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
+        subsidized_band = subsidized_raster.GetRasterBand(1)
+        for block_info, subsidized_mask_array in (
+                pygeoprocessing.iterblocks(subsidized_out_path)):
             (x_indexes, y_indexes) = numpy.meshgrid(
-                xrange(ti_array.shape[1]), xrange(ti_array.shape[0]))
+                xrange(subsidized_mask_array.shape[1]),
+                xrange(subsidized_mask_array.shape[0]))
             index_array = (
                 x_indexes + block_info['xoff'] +
                 (y_indexes + block_info['yoff']) * n_cols)
-            pet_array = pet_band.ReadAsArray(**block_info)
-            l1_array = l1_band.ReadAsArray(**block_info)
-            watershed_mask_array = watershed_mask_band.ReadAsArray(
-                **block_info)
-            l1_upstream_array = l1_upstream_band.ReadAsArray(
-                **block_info)
-
-            valid_mask = (
-                (l1_array != l1_nodata) &
-                (pet_array != pet_nodata) &
-                (ti_array != ti_nodata) &
-                (watershed_mask_array != TI_NODATA) &
-                (l1_upstream_array != l1_upstream_nodata) &
-                (l1_upstream_array > pet_array))
-
-            array_sorter.append(
-                {
-                    'index_array':  index_array[valid_mask],
-                    'ti_array': ti_array[valid_mask],
-                    'pet_array': pet_array[valid_mask],
-                    'l1_array': l1_array[valid_mask],
-                })
-
-        for sorted_indexes in array_sorter.iterarray('index_array'):
-            subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
-            subsidized_band = subsidized_raster.GetRasterBand(1)
-            for block_info, subsidized_mask_array in (
-                    pygeoprocessing.iterblocks(subsidized_out_path)):
-                (x_indexes, y_indexes) = numpy.meshgrid(
-                    xrange(subsidized_mask_array.shape[1]),
-                    xrange(subsidized_mask_array.shape[0]))
-                index_array = (
-                    x_indexes + block_info['xoff'] +
-                    (y_indexes + block_info['yoff']) * n_cols)
-                mask = numpy.in1d(index_array, sorted_indexes).reshape(
-                    index_array.shape)
-                subsidized_mask_array[mask] = 1
-                subsidized_band.WriteArray(
-                    subsidized_mask_array, xoff=block_info['xoff'],
-                    yoff=block_info['yoff'])
-            subsidized_band.FlushCache()
-            subsidized_raster.FlushCache()
-            subsidized_band = None
-            subsidized_raster = None
-
-        LOGGER.error(
-            "breaking because we don't handle overlapping watersheds")
-        break
-
-    return
+            mask = numpy.in1d(index_array, sorted_indexes).reshape(
+                index_array.shape)
+            subsidized_mask_array[mask] = 1
+            subsidized_band.WriteArray(
+                subsidized_mask_array, xoff=block_info['xoff'],
+                yoff=block_info['yoff'])
+        subsidized_band.FlushCache()
+        subsidized_raster.FlushCache()
+        subsidized_band = None
+        subsidized_raster = None
 
 
 class _OutOfCoreNumpyArray(object):
@@ -1528,3 +1395,19 @@ def _calculate_upstream_flow(
 
     os.remove(zero_absorption_source_path)
     os.remove(loss_path)
+
+
+def _calculate_l(l1_path, l2_path, l_out_path):
+    """Calculate L by combining L1, L2, in correct subsidized areas.
+
+    Parameters:
+        l1_path (string): path to upland flow
+        l2_path (string): path to subsidized flow
+        subsidized_mask_path (string): path to raster mask whose pixels are
+            1 where subsidized flow should relpace upland
+        l_out_path (string): path to output flow.
+
+    Returns:
+        None.
+    """
+    pass
