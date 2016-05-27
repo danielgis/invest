@@ -79,6 +79,7 @@ _TMP_BASE_FILES = {
     'wm_path_list': ['wm_%d.tif' % x for x in xrange(_N_MONTHS)],
     'l1_path_list': ['l1_%d.tif' % x for x in xrange(_N_MONTHS)],
     'l2_path_list': ['l2_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'l_path_list': ['l_%d.tif' % x for x in xrange(_N_MONTHS)],
     'cz_aligned_raster_path': 'cz_aligned.tif',
     'subsidized_path_list': [
         'subsidized_%d.tif' % x for x in xrange(_N_MONTHS)],
@@ -95,6 +96,7 @@ SI_NODATA = -1.0
 CN_NODATA = -1.0
 AET_NODATA = -1.0
 L1_NODATA = -1.0
+L2_NODATA = -1.0
 TI_NODATA = -1.0
 
 
@@ -379,21 +381,37 @@ def _execute(args):
         file_registry['soil_depth_aligned_path'], file_registry['ti_path'])
 
     LOGGER.info("calculate subsidized area")
+    pet_nodata = pygeoprocessing.get_nodata_from_uri(
+        file_registry['pet_path_aligned_list'][month_index])
+
+    def _l2_op(l1_array, pet_array):
+        """Create L2 as -PET only where L1 is valid."""
+        result = numpy.empty(l1_array.shape)
+        result[:] = L2_NODATA
+        valid_mask = (l1_array != L1_NODATA) & (pet_array != pet_nodata)
+        result[valid_mask] = -pet_array[valid_mask]
+        return result
+
     for month_index in xrange(_N_MONTHS):
         LOGGER.info("For month %d: ", month_index)
-
         _calculate_upstream_flow(
             file_registry['flow_dir_path'],
             file_registry['dem_valid_path'],
             file_registry['l1_path_list'][month_index],
             args['aoi_path'],
             file_registry['l1_upstream_path_list'][month_index])
+        pygeoprocessing.vectorize_datasets(
+            [file_registry['l1_path_list'][month_index],
+             file_registry['pet_path_aligned_list'][month_index]], _l2_op,
+            file_registry['l2_path_list'][month_index], gdal.GDT_Float32,
+            L2_NODATA, pixel_size, "intersection",
+            datasets_are_pre_aligned=True, vectorize_op=False)
         _calculate_subsidized_area(
             file_registry['l1_path_list'][month_index],
             file_registry['l1_upstream_path_list'][month_index],
+            file_registry['l2_path_list'][month_index],
             file_registry['pet_path_aligned_list'][month_index],
             file_registry['ti_path'], args['aoi_path'],
-            file_registry['temporary_subwatershed_path'],
             file_registry['subsidized_path_list'][month_index])
         _calculate_l(
             file_registry['l1_path_list'][month_index],
@@ -1155,15 +1173,15 @@ def _calculate_ti(
 
 
 def _calculate_subsidized_area(
-        l1_path, l1_upstream_sum_path, pet_path, ti_path, watershed_path,
-        subsidized_out_path):
+        l1_path, l1_upstream_sum_path, l2_path, pet_path, ti_path,
+        watershed_path, subsidized_out_path):
     """Calculated subsidized area such that Eq. 4 is balanced.
 
     Parameters:
         l1_path (string): path to flow raster for upland regions.
         l1_upstream_sum_path (string): path to sum of L1 values upstream.
-        pet_path (string): path to PET raster to use as a -1 * for flow
-            raster for subsidized regions.
+        l2_path (string): path to subsidized flow raster.
+        pet_path (string): path to PET raster.
         ti_path (string): path to topographical index raster.
         watershed_path (string): path to a shapefile that defines the
             watersheds.
@@ -1178,17 +1196,22 @@ def _calculate_subsidized_area(
         os.path.dirname(subsidized_out_path), 'ti_array')
 
     l1_raster = gdal.Open(l1_path)
-    pet_raster = gdal.Open(pet_path)
     l1_band = l1_raster.GetRasterBand(1)
-    pet_band = pet_raster.GetRasterBand(1)
+    l1_nodata = pygeoprocessing.get_nodata_from_uri(l1_path)
+
+    l2_raster = gdal.Open(l2_path)
+    l2_band = l2_raster.GetRasterBand(1)
+    l2_nodata = pygeoprocessing.get_nodata_from_uri(l2_path)
 
     l1_upstream_raster = gdal.Open(l1_upstream_sum_path)
     l1_upstream_band = l1_upstream_raster.GetRasterBand(1)
-
-    l1_nodata = pygeoprocessing.get_nodata_from_uri(l1_path)
     l1_upstream_nodata = pygeoprocessing.get_nodata_from_uri(
         l1_upstream_sum_path)
+
+    pet_raster = gdal.Open(pet_path)
+    pet_band = pet_raster.GetRasterBand(1)
     pet_nodata = pygeoprocessing.get_nodata_from_uri(pet_path)
+
     ti_nodata = pygeoprocessing.get_nodata_from_uri(ti_path)
 
     pygeoprocessing.new_raster_from_base_uri(
@@ -1198,7 +1221,7 @@ def _calculate_subsidized_area(
     l1_sum = pygeoprocessing.aggregate_raster_values_uri(
         l1_path, watershed_path).total[9999]
     l2_sum = -pygeoprocessing.aggregate_raster_values_uri(
-        pet_path, watershed_path).total[9999]
+        l2_path, watershed_path).total[9999]
 
     LOGGER.debug(l1_sum)
     LOGGER.debug(l2_sum)
@@ -1210,13 +1233,14 @@ def _calculate_subsidized_area(
             x_indexes + block_info['xoff'] +
             (y_indexes + block_info['yoff']) * n_cols)
         pet_array = pet_band.ReadAsArray(**block_info)
+        l2_array = l2_band.ReadAsArray(**block_info)
         l1_array = l1_band.ReadAsArray(**block_info)
         l1_upstream_array = l1_upstream_band.ReadAsArray(
             **block_info)
 
         valid_mask = (
             (l1_array != l1_nodata) &
-            (pet_array != pet_nodata) &
+            (l2_array != l2_nodata) &
             (ti_array != ti_nodata) &
             (l1_upstream_array != l1_upstream_nodata) &
             (l1_upstream_array > pet_array))
@@ -1225,7 +1249,7 @@ def _calculate_subsidized_area(
             {
                 'index_array':  index_array[valid_mask],
                 'ti_array': ti_array[valid_mask],
-                'pet_array': pet_array[valid_mask],
+                'l2_array': l2_array[valid_mask],
                 'l1_array': l1_array[valid_mask],
             })
 
@@ -1397,7 +1421,7 @@ def _calculate_upstream_flow(
     os.remove(loss_path)
 
 
-def _calculate_l(l1_path, l2_path, l_out_path):
+def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
     """Calculate L by combining L1, L2, in correct subsidized areas.
 
     Parameters:
