@@ -97,7 +97,9 @@ CN_NODATA = -1.0
 AET_NODATA = -1.0
 L1_NODATA = -1.0
 L2_NODATA = -1.0
+L_NODATA = -1.0
 TI_NODATA = -1.0
+SUBSIDIZED_NODATA = -1.0
 
 
 def execute(args):
@@ -1215,8 +1217,8 @@ def _calculate_subsidized_area(
     ti_nodata = pygeoprocessing.get_nodata_from_uri(ti_path)
 
     pygeoprocessing.new_raster_from_base_uri(
-        ti_path, subsidized_out_path, 'GTiff', TI_NODATA, gdal.GDT_Int32,
-        fill_value=TI_NODATA)
+        ti_path, subsidized_out_path, 'GTiff', SUBSIDIZED_NODATA,
+        gdal.GDT_Int32, fill_value=SUBSIDIZED_NODATA)
 
     l1_sum = pygeoprocessing.aggregate_raster_values_uri(
         l1_path, watershed_path).total[9999]
@@ -1434,4 +1436,23 @@ def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
     Returns:
         None.
     """
-    pass
+    def _l_op(l1_array, l2_array, subsidized_mask_array):
+        """Combine L1 into L2 where subsidized area != 1."""
+        valid_mask = (
+            (l1_array != L1_NODATA) &
+            (l2_array != L2_NODATA) &
+            (subsidized_mask_array != SUBSIDIZED_NODATA))
+
+        result = numpy.empty(l1_array.shape)
+        result[:] = L_NODATA
+        result[valid_mask] = l1_array[valid_mask]
+
+        l2_mask = (subsidized_mask_array == 1) & valid_mask
+        result[l2_mask] = l2_array[l2_mask]
+        return result
+
+    cell_size = pygeoprocessing.get_cell_size_from_uri(l1_path)
+    pygeoprocessing.vectorize_datasets(
+        [l1_path, l2_path, subsidized_mask_path], _l_op, l_out_path,
+        gdal.GDT_Float32, L_NODATA, cell_size, 'intersection',
+        vectorize_op=False, datasets_are_pre_aligned=True)
