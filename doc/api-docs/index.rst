@@ -19,6 +19,7 @@ InVEST is licensed under a permissive, modified BSD license.
 
 For more information, see:
   * InVEST on `bitbucket <https://bitbucket.org/natcap/invest>`_
+  * The latest `InVEST User's Guide <http://data.naturalcapitalproject.org/nightly-build/invest-users-guide/html/>`_
   * The `Natural Capital Project website <http://naturalcapitalproject.org/invest>`_.
 
 
@@ -39,6 +40,7 @@ API Reference
 .. toctree::
     :maxdepth: 1
 
+    InVEST Model Entry Points <models>
     Full API Reference <api>
     ecosystem_service_analysis_tools
     final_ecosystem_services

@@ -14,11 +14,13 @@
 
 import sys
 import os
+import imp
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
+DOCS_SOURCE_DIR = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(DOCS_SOURCE_DIR, '..', '..', 'src'))
 
 # -- General configuration ------------------------------------------------
 
@@ -57,7 +59,7 @@ copyright = u'2015, The Natural Capital Project'
 # The short X.Y version.
 import natcap.versioner
 _version = natcap.versioner.parse_version(
-    root=os.path.join(os.path.dirname(__file__), '..', '..'))
+    root=os.path.join(DOCS_SOURCE_DIR, '..', '..'))
 version = _version.split('+')[0]
 # The full version, including alpha/beta/rc tags.
 release = _version
@@ -254,7 +256,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'invest3', u'InVEST 3 Documentation',
+    ('index', 'invest', u'InVEST Documentation',
      [u'The Natural Capital Project'], 1)
 ]
 
@@ -289,25 +291,16 @@ texinfo_documents = [
 autodoc_mock_imports = [
     'sextante', 'matplotlib', 'matplotlib.pyplot', 'matplotlib.pylab',
     'pylab', 'pyamg', 'osgeo', 'PyQt4', 'h5py', 'shapely', 'shapely.wkb',
-    'rtree', 'seasonal_water_yield_core', 'Pyro4', 'PyQt4.QtGui.QWidget',
-    'numpy', 'scipy', 'scipy.sparse', 'scipy.sparse.linalg', 'scipy.special',
-    'shapely.geometry', 'scipy.sparse.csgraph', 'osgeo.osr', 'scipy.stats',
-    'scipy.spatial', 'scipy.ndimage',
+    'rtree', 'Pyro4', 'PyQt4.QtGui.QWidget',
+    'shapely.geometry', 'osgeo.osr',
+    'shapely.wkt', 'shapely.ops',
+    'shapely.prepared', 'qgis.utils', 'grass.script.setup', 'PyQt4.QtTest',
+    'PyQt4.QtCore',
 ]
-
-# Mock out pygeoprocessing here so I can manually set the version attribute to
-# an acceptable string.
-import mock
-_pygeoprocessing = mock.Mock()
-_pygeoprocessing.__version__ = '100.0.0'
-sys.modules['pygeoprocessing'] = _pygeoprocessing
-sys.modules['pygeoprocessing.geoprocessing'] = mock.Mock()
-sys.modules['pygeoprocessing.routing'] = mock.Mock()
-
-
 
 # Mock class with attribute handling.  As suggested by:
 # http://read-the-docs.readthedocs.io/en/latest/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
+import mock
 class Mock(mock.Mock):
     def __getattr__(self, name):
         return Mock()
@@ -317,12 +310,16 @@ class Mock(mock.Mock):
 # mocked up.
 for name in autodoc_mock_imports:
     sys.modules[name] = Mock()
+
 from sphinx import apidoc
 apidoc.main([
     '--separate',
     '-E',
-    '-o', os.path.join(os.path.dirname(__file__), 'api'),
-    os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'natcap')
+    '-o', os.path.join(DOCS_SOURCE_DIR, 'api'),
+    os.path.join(DOCS_SOURCE_DIR, '..', '..', 'src', 'natcap')
 ])
 
 
+# list out all the models that conform to the InVEST API standard.
+listmodels = imp.load_source('listmodels', os.path.join(DOCS_SOURCE_DIR, 'listmodels.py'))
+listmodels.main([])
