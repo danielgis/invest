@@ -72,19 +72,25 @@ _TMP_BASE_FILES = {
     'n_events_path_list': ['n_events_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'et0_path_aligned_list': ['et0_a_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'pet_path_aligned_list': ['pet_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'pet_annual_path': 'pet_annual.tif',
     'kc_path_list': ['kc_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'z_rm_path_list': ['z_rm_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'pawc_aligned_path': 'pawc_aligned.tif',
     'wm_path_list': ['wm_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'l1_path_list': ['l1_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l1_annual_path': 'l1_annual.tif',
     'l2_path_list': ['l2_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l2_annual_path': 'l2_annual.tif',
     'l_path_list': ['l_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l_annual_path': 'l_annual.tif',
     'cz_aligned_raster_path': 'cz_aligned.tif',
     'subsidized_path_list': [
         'subsidized_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'subsidized_annual_path': 'subsidized.tif',
     'temporary_subwatershed_path': 'temporary_subwatershed.shp',
     'l1_upstream_path_list': [
         'l1_upstream_sum_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l1_annual_upstream_path': 'l1_annual_upstream.tif',
     }
 
 ROOT_DEPTH_NODATA = -1.0
@@ -94,6 +100,7 @@ KC_NODATA = -1.0
 SI_NODATA = -1.0
 CN_NODATA = -1.0
 AET_NODATA = -1.0
+PET_NODATA = -1.0
 L1_NODATA = -1.0
 L2_NODATA = -1.0
 L_NODATA = -1.0
@@ -372,6 +379,12 @@ def _execute(args):
         file_registry['dem_valid_path'],
         file_registry['flow_accum_path'])
 
+    LOGGER.info('stream thresholding')
+    pygeoprocessing.routing.stream_threshold(
+        file_registry['flow_accum_path'],
+        threshold_flow_accumulation,
+        file_registry['stream_path'])
+
     LOGGER.info('calculate slope')
     pygeoprocessing.calculate_slope(
         file_registry['dem_valid_path'], file_registry['slope_path'])
@@ -382,14 +395,12 @@ def _execute(args):
         file_registry['soil_depth_aligned_path'], file_registry['ti_path'])
 
     LOGGER.info("calculate subsidized area")
-    pet_nodata = pygeoprocessing.get_nodata_from_uri(
-        file_registry['pet_path_aligned_list'][month_index])
 
     def _l2_op(l1_array, pet_array):
         """Create L2 as -PET only where L1 is valid."""
         result = numpy.empty(l1_array.shape)
         result[:] = L2_NODATA
-        valid_mask = (l1_array != L1_NODATA) & (pet_array != pet_nodata)
+        valid_mask = (l1_array != L1_NODATA) & (pet_array != PET_NODATA)
         result[valid_mask] = -pet_array[valid_mask]
         return result
 
@@ -419,167 +430,59 @@ def _execute(args):
             file_registry['l2_path_list'][month_index],
             file_registry['subsidized_path_list'][month_index],
             file_registry['l_path_list'][month_index])
-    return
 
+    LOGGER.info("Annual calculation")
 
-    LOGGER.info('stream thresholding')
-    pygeoprocessing.routing.stream_threshold(
-        file_registry['flow_accum_path'],
-        threshold_flow_accumulation,
-        file_registry['stream_path'])
+    def _sum_op(nodata_value):
+        """Make a sum operation that operates on user defined nodata value."""
+        def __sum_op(*arrays):
+            """Sum values in arrays assuming they are nodata aligned."""
+            result = numpy.empty(arrays[0].shape, dtype=numpy.float32)
+            result[:] = nodata_value
+            valid_mask = arrays[0] != nodata_value
+            result[valid_mask] = numpy.sum(
+                [_[valid_mask] for _ in arrays], axis=0)
+            return result
+        return __sum_op
 
-    LOGGER.info('quick flow')
-    LOGGER.info('loading number of monthly events')
-    for month_id in xrange(_N_MONTHS):
-        if args['user_defined_climate_zones']:
-            cz_rain_events_lookup = (
-                pygeoprocessing.get_lookup_from_table(
-                    args['climate_zone_table_path'], 'cz_id'))
-            month_label = MONTH_ID_TO_LABEL[month_id]
-            climate_zone_rain_events_month = dict([
-                (cz_id, cz_rain_events_lookup[cz_id][month_label]) for
-                cz_id in cz_rain_events_lookup])
-            pygeoprocessing.reclassify_dataset_uri(
-                file_registry['cz_aligned_raster_path'],
-                climate_zone_rain_events_month,
-                file_registry['n_events_path_list'][month_id],
-                gdal.GDT_Float32, N_EVENTS_NODATA)
-        else:
-            # rain_events_lookup defined near entry point of execute
-            n_events = rain_events_lookup[month_id+1]['events']
-            pygeoprocessing.make_constant_raster_from_base_uri(
-                file_registry['dem_valid_path'], n_events,
-                file_registry['n_events_path_list'][month_id])
-
-        LOGGER.info('calculate curve number')
-        _calculate_curve_number_raster(
-            file_registry['lulc_valid_path'],
-            file_registry['soil_group_aligned_path'],
-            biophysical_table, file_registry['cn_path'])
-
-        LOGGER.info('calculate Si raster')
-        _calculate_si_raster(
-            file_registry['cn_path'], file_registry['stream_path'],
-            file_registry['si_path'])
-
-        for month_index in xrange(_N_MONTHS):
-            LOGGER.info('calculate quick flow for month %d', month_index+1)
-            _calculate_monthly_quick_flow(
-                file_registry['precip_path_aligned_list'][month_index],
-                file_registry['lulc_valid_path'], file_registry['cn_path'],
-                file_registry['n_events_path_list'][month_index],
-                file_registry['stream_path'],
-                file_registry['qfm_path_list'][month_index],
-                file_registry['si_path'])
-
-        LOGGER.info('calculate QFi')
-
-        def qfi_sum_op(*qf_values):
-            """Sum the monthly qfis."""
-            qf_sum = numpy.zeros(qf_values[0].shape)
-            valid_mask = qf_values[0] != QF_NODATA
-            valid_qf_sum = qf_sum[valid_mask]
-            for index in xrange(len(qf_values)):
-                valid_qf_sum += qf_values[index][valid_mask]
-            qf_sum[:] = QF_NODATA
-            qf_sum[valid_mask] = valid_qf_sum
-            return qf_sum
-
-        pygeoprocessing.vectorize_datasets(
-            file_registry['qfm_path_list'], qfi_sum_op,
-            file_registry['qf_path'], gdal.GDT_Float32, QF_NODATA,
-            pixel_size, 'intersection', vectorize_op=False,
-            datasets_are_pre_aligned=True)
-
-        LOGGER.info('calculate local recharge')
-
-        # call through to a cython function that does the necessary routing
-        # between AET and L.sum.avail in equation [7], [4], and [3]
-        seasonal_water_yield_core.calculate_local_recharge(
-            file_registry['precip_path_aligned_list'],
-            file_registry['et0_path_aligned_list'],
-            file_registry['qfm_path_list'],
-            file_registry['flow_dir_path'],
-            file_registry['outflow_weights_path'],
-            file_registry['outflow_direction_path'],
-            file_registry['dem_valid_path'],
-            file_registry['lulc_valid_path'], alpha_month,
-            beta_i, gamma, file_registry['stream_path'],
-            file_registry['l_path'],
-            file_registry['l_avail_path'],
-            file_registry['l_sum_avail_path'],
-            file_registry['aet_path'], file_registry['kc_path_list'])
-
-    # calculate Qb as the sum of local_recharge_avail over the AOI, Eq [9]
-    qb_sum, qb_valid_count = _sum_valid(file_registry['l_path'])
-    qb_result = qb_sum / qb_valid_count
-
-    pixel_size = pygeoprocessing.get_cell_size_from_uri(
-        file_registry['l_path'])
-    ri_nodata = pygeoprocessing.get_nodata_from_uri(
-        file_registry['l_path'])
-
-    def vri_op(ri_array):
-        """Calculate vri index [Eq 10]."""
-        return numpy.where(
-            ri_array != ri_nodata,
-            ri_array / qb_result / qb_valid_count, ri_nodata)
+    # Calc annual L1
     pygeoprocessing.vectorize_datasets(
-        [file_registry['l_path']], vri_op,
-        file_registry['vri_path'], gdal.GDT_Float32, ri_nodata,
-        pixel_size, 'intersection', vectorize_op=False,
-        datasets_are_pre_aligned=True)
+        file_registry['l1_path_list'], _sum_op(L1_NODATA),
+        file_registry['l1_annual_path'], gdal.GDT_Float32, L1_NODATA,
+        pixel_size, "intersection", datasets_are_pre_aligned=True,
+        vectorize_op=False)
+    # calc annual L2
+    pygeoprocessing.vectorize_datasets(
+        file_registry['l2_path_list'], _sum_op(L2_NODATA),
+        file_registry['l2_annual_path'], gdal.GDT_Float32, L2_NODATA,
+        pixel_size, "intersection", datasets_are_pre_aligned=True,
+        vectorize_op=False)
+    # calc annual PET
+    pygeoprocessing.vectorize_datasets(
+        file_registry['pet_path_aligned_list'], _sum_op(PET_NODATA),
+        file_registry['pet_annual_path'], gdal.GDT_Float32, PET_NODATA,
+        pixel_size, "intersection", datasets_are_pre_aligned=True,
+        vectorize_op=False)
 
-    _aggregate_recharge(
-        args['aoi_path'], file_registry['l_path'],
-        file_registry['vri_path'],
-        file_registry['aggregate_vector_path'])
-
-    LOGGER.info('calculate L_sum')  # Eq. [12]
-    pygeoprocessing.make_constant_raster_from_base_uri(
-        file_registry['dem_valid_path'], 0.0,
-        file_registry['zero_absorption_source_path'])
-    pygeoprocessing.routing.route_flux(
+    _calculate_upstream_flow(
         file_registry['flow_dir_path'],
         file_registry['dem_valid_path'],
-        file_registry['l_path'],
-        file_registry['zero_absorption_source_path'],
-        file_registry['loss_path'],
-        file_registry['l_sum_path'], 'flux_only',
-        stream_uri=file_registry['stream_path'])
+        file_registry['l1_annual_path'], args['aoi_path'],
+        file_registry['l1_annual_upstream_path'])
+    _calculate_subsidized_area(
+        qb_value, file_registry['l1_annual_path'],
+        file_registry['l1_annual_upstream_path'],
+        file_registry['l2_annual_path'],
+        file_registry['pet_annual_path'],
+        file_registry['ti_path'], args['aoi_path'],
+        file_registry['subsidized_annual_path'])
+    _calculate_l(
+        file_registry['l1_annual_path'],
+        file_registry['l2_annual_path'],
+        file_registry['subsidized_annual_path'],
+        file_registry['l_annual_path'])
 
-    LOGGER.info('calculate B_sum')
-    seasonal_water_yield_core.route_baseflow_sum(
-        file_registry['dem_valid_path'],
-        file_registry['l_path'],
-        file_registry['l_avail_path'],
-        file_registry['l_sum_path'],
-        file_registry['outflow_direction_path'],
-        file_registry['outflow_weights_path'],
-        file_registry['stream_path'],
-        file_registry['b_sum_path'])
-
-    LOGGER.info('calculate B')
-    b_sum_nodata = pygeoprocessing.get_nodata_from_uri(
-        file_registry['b_sum_path'])
-    ri_nodata = b_sum_nodata
-
-    def op_b(b_sum, l_avail, l_sum):
-        """Calculate B=B_sum*Lavail/L_sum."""
-        valid_mask = ((b_sum != b_sum_nodata) & (l_sum != 0))
-        result = numpy.empty(b_sum.shape)
-        result[:] = b_sum_nodata
-        result[valid_mask] = (
-            b_sum[valid_mask] * l_avail[valid_mask] / l_sum[valid_mask])
-        return result
-
-    pygeoprocessing.vectorize_datasets(
-        [file_registry['b_sum_path'],
-         file_registry['l_avail_path'],
-         file_registry['l_sum_path']], op_b,
-        file_registry['b_path'],
-        gdal.GDT_Float32, b_sum_nodata, pixel_size, 'intersection',
-        vectorize_op=False, datasets_are_pre_aligned=True)
+    return
 
     LOGGER.info('deleting temporary files')
     for file_id in _TMP_BASE_FILES:
@@ -976,20 +879,19 @@ def _calculate_aet_uphill(
     LOGGER.info("calculate PET")
     et0_nodata = pygeoprocessing.get_nodata_from_uri(et0_path)
     kc_nodata = pygeoprocessing.get_nodata_from_uri(kc_path)
-    pet_nodata = et0_nodata  # reasonable to set PET nodata to et0 nodata
     pixel_size = pygeoprocessing.get_cell_size_from_uri(precip_path)
 
     def _pet_op(et0_array, kc_array):
         """Calculate PET."""
         result = numpy.empty(et0_array.shape, dtype=numpy.float32)
-        result[:] = pet_nodata
+        result[:] = PET_NODATA
         valid_mask = ((et0_array != et0_nodata) & (kc_array != kc_nodata))
         result[valid_mask] = et0_array[valid_mask] * kc_array[valid_mask]
         return result
 
     pygeoprocessing.vectorize_datasets(
         [et0_path, kc_path], _pet_op, out_pet_path,
-        gdal.GDT_Float32, pet_nodata, pixel_size, 'intersection',
+        gdal.GDT_Float32, PET_NODATA, pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
     LOGGER.info("calculate Wm")
@@ -1001,7 +903,7 @@ def _calculate_aet_uphill(
         result[:] = AET_NODATA
         valid_mask = (
             (precip_array != precip_nodata) &
-            (pet_array != pet_nodata) &
+            (pet_array != PET_NODATA) &
             (pet_array != 0.0))
 
         result[valid_mask] = precip_array[valid_mask] / pet_array[valid_mask]
@@ -1049,7 +951,7 @@ def _calculate_aet_uphill(
         result = numpy.empty(pet_array.shape, dtype=numpy.float32)
         result[:] = AET_NODATA
         valid_mask = (
-            (pet_array != pet_nodata) &
+            (pet_array != PET_NODATA) &
             (root_depth_array != root_depth_nodata) &
             (w_m_array != AET_NODATA) &
             (z_rm_array != AET_NODATA))
@@ -1251,12 +1153,8 @@ def _calculate_subsidized_area(
 
     # Initialize the sums
     l1_sum = l1_aggregate_values.total[9999]
-    LOGGER.debug(l1_sum)
-    LOGGER.debug(l2_aggregate_values.total[9999])
     l2_sum = 0.0
     n_pixels = l1_aggregate_values.n_pixels[9999]
-    LOGGER.debug(qb_val * n_pixels)
-    LOGGER.debug(l1_sum - qb_val * n_pixels)
 
     for index_array, ti_array, l1_array, l2_array in zip(
             *[array_sorter.iterarray(_) for _ in [
