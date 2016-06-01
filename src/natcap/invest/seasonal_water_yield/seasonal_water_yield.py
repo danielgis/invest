@@ -7,7 +7,6 @@ import collections
 import os
 import logging
 import re
-import fractions
 import uuid
 import warnings
 
@@ -20,7 +19,7 @@ import pygeoprocessing.routing
 import pygeoprocessing.routing.routing_core
 from .. import utils
 
-import seasonal_water_yield_core  #pylint: disable=import-error
+import seasonal_water_yield_core  # pylint: disable=import-error
 
 logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
@@ -67,25 +66,25 @@ _TMP_BASE_FILES = {
     'flow_accum_path': 'flow_accum.tif',
     'root_depth_path': 'root_depth.tif',
     'precip_path_aligned_list': [
-        'prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
+        'prcp_a%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'valid_precip_path_list':  [
-        'valid_prcp_a%d.tif' % x for x in xrange(_N_MONTHS)],
-    'n_events_path_list': ['n_events_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'et0_path_aligned_list': ['et0_a_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'pet_path_aligned_list': ['pet_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'kc_path_list': ['kc_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'z_rm_path_list': ['z_rm_%d.tif' % x for x in xrange(_N_MONTHS)],
+        'valid_prcp_a%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'n_events_path_list': ['n_events_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'et0_path_aligned_list': ['et0_a_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'pet_path_aligned_list': ['pet_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'kc_path_list': ['kc_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'z_rm_path_list': ['z_rm_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'pawc_aligned_path': 'pawc_aligned.tif',
-    'wm_path_list': ['wm_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'l1_path_list': ['l1_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'l2_path_list': ['l2_%d.tif' % x for x in xrange(_N_MONTHS)],
-    'l_path_list': ['l_%d.tif' % x for x in xrange(_N_MONTHS)],
+    'wm_path_list': ['wm_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l1_path_list': ['l1_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l2_path_list': ['l2_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l_path_list': ['l_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'cz_aligned_raster_path': 'cz_aligned.tif',
     'subsidized_path_list': [
-        'subsidized_%d.tif' % x for x in xrange(_N_MONTHS)],
+        'subsidized_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'temporary_subwatershed_path': 'temporary_subwatershed.shp',
     'l1_upstream_path_list': [
-        'l1_upstream_sum_%d.tif' % x for x in xrange(_N_MONTHS)],
+        'l1_upstream_sum_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     }
 
 ROOT_DEPTH_NODATA = -1.0
@@ -409,7 +408,7 @@ def _execute(args):
             L2_NODATA, pixel_size, "intersection",
             datasets_are_pre_aligned=True, vectorize_op=False)
         _calculate_subsidized_area(
-            file_registry['l1_path_list'][month_index],
+            qb_value, file_registry['l1_path_list'][month_index],
             file_registry['l1_upstream_path_list'][month_index],
             file_registry['l2_path_list'][month_index],
             file_registry['pet_path_aligned_list'][month_index],
@@ -1175,11 +1174,12 @@ def _calculate_ti(
 
 
 def _calculate_subsidized_area(
-        l1_path, l1_upstream_sum_path, l2_path, pet_path, ti_path,
+        qb_val, l1_path, l1_upstream_sum_path, l2_path, pet_path, ti_path,
         watershed_path, subsidized_out_path):
     """Calculated subsidized area such that Eq. 4 is balanced.
 
     Parameters:
+        qb_val (float): Qb value to balance subsidized area to.
         l1_path (string): path to flow raster for upland regions.
         l1_upstream_sum_path (string): path to sum of L1 values upstream.
         l2_path (string): path to subsidized flow raster.
@@ -1199,11 +1199,8 @@ def _calculate_subsidized_area(
 
     l1_raster = gdal.Open(l1_path)
     l1_band = l1_raster.GetRasterBand(1)
-    l1_nodata = pygeoprocessing.get_nodata_from_uri(l1_path)
-
     l2_raster = gdal.Open(l2_path)
     l2_band = l2_raster.GetRasterBand(1)
-    l2_nodata = pygeoprocessing.get_nodata_from_uri(l2_path)
 
     l1_upstream_raster = gdal.Open(l1_upstream_sum_path)
     l1_upstream_band = l1_upstream_raster.GetRasterBand(1)
@@ -1212,21 +1209,19 @@ def _calculate_subsidized_area(
 
     pet_raster = gdal.Open(pet_path)
     pet_band = pet_raster.GetRasterBand(1)
-    pet_nodata = pygeoprocessing.get_nodata_from_uri(pet_path)
-
-    ti_nodata = pygeoprocessing.get_nodata_from_uri(ti_path)
 
     pygeoprocessing.new_raster_from_base_uri(
         ti_path, subsidized_out_path, 'GTiff', SUBSIDIZED_NODATA,
         gdal.GDT_Int32, fill_value=SUBSIDIZED_NODATA)
 
-    l1_sum = pygeoprocessing.aggregate_raster_values_uri(
-        l1_path, watershed_path).total[9999]
-    l2_sum = -pygeoprocessing.aggregate_raster_values_uri(
-        l2_path, watershed_path).total[9999]
+    l1_aggregate_values = pygeoprocessing.aggregate_raster_values_uri(
+        l1_path, watershed_path)
+    l2_aggregate_values = pygeoprocessing.aggregate_raster_values_uri(
+        l2_path, watershed_path)
 
-    LOGGER.debug(l1_sum)
-    LOGGER.debug(l2_sum)
+    assert(
+        l1_aggregate_values.n_pixels[9999] ==
+        l2_aggregate_values.n_pixels[9999])
 
     for block_info, ti_array in pygeoprocessing.iterblocks(ti_path):
         (x_indexes, y_indexes) = numpy.meshgrid(
@@ -1241,9 +1236,8 @@ def _calculate_subsidized_area(
             **block_info)
 
         valid_mask = (
-            (l1_array != l1_nodata) &
-            (l2_array != l2_nodata) &
-            (ti_array != ti_nodata) &
+            (l1_array != L1_NODATA) & (l2_array != L2_NODATA) &
+            (ti_array != TI_NODATA) &
             (l1_upstream_array != l1_upstream_nodata) &
             (l1_upstream_array > pet_array))
 
@@ -1255,7 +1249,48 @@ def _calculate_subsidized_area(
                 'l1_array': l1_array[valid_mask],
             })
 
-    for sorted_indexes in array_sorter.iterarray('index_array'):
+    # Initialize the sums
+    l1_sum = l1_aggregate_values.total[9999]
+    LOGGER.debug(l1_sum)
+    LOGGER.debug(l2_aggregate_values.total[9999])
+    l2_sum = 0.0
+    n_pixels = l1_aggregate_values.n_pixels[9999]
+    LOGGER.debug(qb_val * n_pixels)
+    LOGGER.debug(l1_sum - qb_val * n_pixels)
+
+    for index_array, ti_array, l1_array, l2_array in zip(
+            *[array_sorter.iterarray(_) for _ in [
+                'index_array', 'ti_array', 'l1_array', 'l2_array']]):
+
+        # find a cut in l1_array/l2_array that attempts to balance the
+        # subsidized area
+        low_enough = 0
+        too_high = l1_array.size
+
+        while True:
+            cut_index = (too_high + low_enough) // 2
+            running_sum = (
+                l1_sum - numpy.sum(l1_array[0:cut_index]) +
+                l2_sum + numpy.sum(l2_array[0:cut_index]) - qb_val * n_pixels)
+            if running_sum >= 0:
+                if too_high - low_enough > 1:
+                    low_enough = cut_index
+                else:
+                    break
+            else:
+                too_high = cut_index
+
+            if low_enough == too_high:
+                cut_index = -1
+                break
+
+        if cut_index == -1:
+            # there's nothing to add
+            break
+
+        l1_sum = l1_sum - numpy.sum(l1_array[0:cut_index])
+        l2_sum = l2_sum + numpy.sum(l2_array[0:cut_index])
+
         subsidized_raster = gdal.Open(subsidized_out_path, gdal.GA_Update)
         subsidized_band = subsidized_raster.GetRasterBand(1)
         for block_info, subsidized_mask_array in (
@@ -1263,11 +1298,12 @@ def _calculate_subsidized_area(
             (x_indexes, y_indexes) = numpy.meshgrid(
                 xrange(subsidized_mask_array.shape[1]),
                 xrange(subsidized_mask_array.shape[0]))
-            index_array = (
+            block_indexes = (
                 x_indexes + block_info['xoff'] +
                 (y_indexes + block_info['yoff']) * n_cols)
-            mask = numpy.in1d(index_array, sorted_indexes).reshape(
-                index_array.shape)
+            mask = numpy.in1d(
+                block_indexes, index_array[0:cut_index]).reshape(
+                    block_indexes.shape)
             subsidized_mask_array[mask] = 1
             subsidized_band.WriteArray(
                 subsidized_mask_array, xoff=block_info['xoff'],
@@ -1440,8 +1476,7 @@ def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
         """Combine L1 into L2 where subsidized area != 1."""
         valid_mask = (
             (l1_array != L1_NODATA) &
-            (l2_array != L2_NODATA) &
-            (subsidized_mask_array != SUBSIDIZED_NODATA))
+            (l2_array != L2_NODATA))
 
         result = numpy.empty(l1_array.shape)
         result[:] = L_NODATA
