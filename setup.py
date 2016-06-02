@@ -105,11 +105,6 @@ EXTENSION_LIST = ([
         sources=['src/natcap/invest/ndr/ndr_core.pyx'],
         language="c++",
         include_dirs=[numpy.get_include()]),
-    Extension(
-        name="seasonal_water_yield_core",
-        sources=['src/natcap/invest/seasonal_water_yield/seasonal_water_yield_core.pyx'],
-        language="c++",
-        include_dirs=[numpy.get_include()]),
     ])
 
 if not USE_CYTHON:
@@ -190,7 +185,6 @@ setup(
         'natcap.invest.routing',
         'natcap.invest.scenario_generator',
         'natcap.invest.scenic_quality',
-        'natcap.invest.seasonal_water_yield',
         'natcap.invest.testing',
         'natcap.invest.timber',
         'natcap.invest.wave_energy',
