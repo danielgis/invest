@@ -17,7 +17,7 @@ from osgeo import ogr
 import pygeoprocessing
 import pygeoprocessing.routing
 import pygeoprocessing.routing.routing_core
-from .. import utils
+import utils
 
 import seasonal_water_yield_core  # pylint: disable=import-error
 
@@ -33,26 +33,14 @@ MONTH_ID_TO_LABEL = [
     'nov', 'dec']
 
 _OUTPUT_BASE_FILES = {
-    'aggregate_vector_path': 'aggregated_results.shp',
-    'annual_precip_path': 'P.tif',
-    'l_avail_path': 'L_avail.tif',
-    'l_path': 'L.tif',
-    'l_sum_path': 'L_sum.tif',
-    'l_sum_avail_path': 'L_sum_avail.tif',
-    'b_sum_path': 'B_sum.tif',
-    'b_path': 'B.tif',
-    'vri_path': 'Vri.tif',
+    'l_path_list': ['l_%d.tif' % _ for _ in xrange(_N_MONTHS)],
+    'l_annual_path': 'l_annual.tif',
     }
 
 _INTERMEDIATE_BASE_FILES = {
-    'aet_path': 'aet.tif',
     'aetm_path_list': ['aetm_%d.tif' % (_+1) for _ in xrange(_N_MONTHS)],
     'flow_dir_path': 'flow_dir.tif',
-    'stream_path': 'stream.tif',
     'ti_path': 'ti.tif',
-}
-
-_TMP_BASE_FILES = {
     'outflow_direction_path': 'outflow_direction.tif',
     'outflow_weights_path': 'outflow_weights.tif',
     'lulc_aligned_path': 'lulc_aligned.tif',
@@ -60,9 +48,7 @@ _TMP_BASE_FILES = {
     'lulc_valid_path': 'lulc_valid.tif',
     'dem_valid_path': 'dem_valid.tif',
     'slope_path': 'slope.tif',
-    'loss_path': 'loss.tif',
     'soil_depth_aligned_path': 'soil_depth.tif',
-    'zero_absorption_source_path': 'zero_absorption.tif',
     'flow_accum_path': 'flow_accum.tif',
     'root_depth_path': 'root_depth.tif',
     'precip_path_aligned_list': [
@@ -81,16 +67,17 @@ _TMP_BASE_FILES = {
     'l1_annual_path': 'l1_annual.tif',
     'l2_path_list': ['l2_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'l2_annual_path': 'l2_annual.tif',
-    'l_path_list': ['l_%d.tif' % _ for _ in xrange(_N_MONTHS)],
-    'l_annual_path': 'l_annual.tif',
     'cz_aligned_raster_path': 'cz_aligned.tif',
     'subsidized_path_list': [
         'subsidized_%d.tif' % _ for _ in xrange(_N_MONTHS)],
-    'subsidized_annual_path': 'subsidized.tif',
+    'subsidized_annual_path': 'subsidized_annual.tif',
     'temporary_subwatershed_path': 'temporary_subwatershed.shp',
     'l1_upstream_path_list': [
         'l1_upstream_sum_%d.tif' % _ for _ in xrange(_N_MONTHS)],
     'l1_annual_upstream_path': 'l1_annual_upstream.tif',
+}
+
+_TMP_BASE_FILES = {
     }
 
 ROOT_DEPTH_NODATA = -1.0
@@ -121,10 +108,6 @@ def execute(args):
         temporary, and final files
         args['results_suffix'] (string): (optional) string to append to any
             output files
-        args['threshold_flow_accumulation'] (number): used when classifying
-            stream pixels from the DEM by thresholding the number of upstream
-            cells that must flow into a cell before it's considered
-            part of a stream.
         args['et0_dir'] (string): Path to a directory that contains rasters of
             monthly reference evapotranspiration; units in mm.
         args['precip_dir'] (string): Path to a directory that contains rasters
@@ -201,7 +184,6 @@ def _execute(args):
     biophysical_table = pygeoprocessing.get_lookup_from_table(
         args['biophysical_table_path'], 'lucode')
 
-    threshold_flow_accumulation = float(args['threshold_flow_accumulation'])
     qb_value = float(args['qb_value'])
     pixel_size = pygeoprocessing.get_cell_size_from_uri(
         args['dem_raster_path'])
@@ -217,15 +199,6 @@ def _execute(args):
         [(_OUTPUT_BASE_FILES, output_dir),
          (_INTERMEDIATE_BASE_FILES, intermediate_output_dir),
          (_TMP_BASE_FILES, output_dir)], file_suffix)
-
-    LOGGER.info('Checking that the AOI is not the output aggregate vector')
-    if (os.path.normpath(args['aoi_path']) ==
-            os.path.normpath(file_registry['aggregate_vector_path'])):
-        raise ValueError(
-            "The input AOI is the same as the output aggregate vector, "
-            "please choose a different workspace or move the AOI file "
-            "out of the current workspace %s" %
-            file_registry['aggregate_vector_path'])
 
     LOGGER.info('Aligning and clipping dataset list')
     input_align_list = [
@@ -344,7 +317,7 @@ def _execute(args):
             gdal.GDT_Float32, N_EVENTS_NODATA)
 
         _calculate_aet_uphill(
-            file_registry['precip_path_aligned_list'][month_index],
+            file_registry['valid_precip_path_list'][month_index],
             file_registry['kc_path_list'][month_index],
             file_registry['et0_path_aligned_list'][month_index],
             file_registry['pawc_aligned_path'],
@@ -357,7 +330,7 @@ def _execute(args):
 
         LOGGER.info("Calculate L1")
         _calculate_l1(
-            file_registry['precip_path_aligned_list'][month_index],
+            file_registry['valid_precip_path_list'][month_index],
             file_registry['aetm_path_list'][month_index],
             file_registry['l1_path_list'][month_index]
             )
@@ -378,12 +351,6 @@ def _execute(args):
         file_registry['flow_dir_path'],
         file_registry['dem_valid_path'],
         file_registry['flow_accum_path'])
-
-    LOGGER.info('stream thresholding')
-    pygeoprocessing.routing.stream_threshold(
-        file_registry['flow_accum_path'],
-        threshold_flow_accumulation,
-        file_registry['stream_path'])
 
     LOGGER.info('calculate slope')
     pygeoprocessing.calculate_slope(
@@ -482,8 +449,6 @@ def _execute(args):
         file_registry['subsidized_annual_path'],
         file_registry['l_annual_path'])
 
-    return
-
     LOGGER.info('deleting temporary files')
     for file_id in _TMP_BASE_FILES:
         try:
@@ -503,316 +468,6 @@ def _execute(args):
     LOGGER.info(' `--\' (v  __( / ||')
     LOGGER.info('       |||  ||| ||')
     LOGGER.info('      //_| //_|')
-
-
-def _calculate_monthly_quick_flow(
-        precip_path, lulc_raster_path, cn_path, n_events_raster_path,
-        stream_path, qf_monthly_path, si_path):
-    """Calculate quick flow for a month.
-
-    Parameters:
-        precip_path (string): path to file that correspond to monthly
-            precipitation
-        lulc_raster_path (string): path to landcover raster
-        cn_path (string): path to curve number raster
-        n_events_raster_path (string): a path to a raster where each pixel
-            indicates the number of rain events.
-        stream_path (string): path to stream mask raster where 1 indicates a
-            stream pixel, 0 is a non-stream but otherwise valid area from the
-            original DEM, and nodata indicates areas outside the valid DEM.
-        qf_monthly_path_list (list of string): list of paths to output monthly
-            rasters.
-        si_path (string): list to output raster for potential maximum retention
-
-    Returns:
-        None
-    """
-    cn_nodata = pygeoprocessing.get_nodata_from_uri(cn_path)
-
-    def si_op(ci_array, stream_array):
-        """Potential maximum retention."""
-        si_array = 1000.0 / ci_array - 10
-        si_array = numpy.where(ci_array != cn_nodata, si_array, SI_NODATA)
-        si_array[stream_array == 1] = 0
-        return si_array
-
-    pixel_size = pygeoprocessing.get_cell_size_from_uri(
-        lulc_raster_path)
-    pygeoprocessing.vectorize_datasets(
-        [cn_path, stream_path], si_op, si_path, gdal.GDT_Float32,
-        SI_NODATA, pixel_size, 'intersection', vectorize_op=False,
-        datasets_are_pre_aligned=True)
-
-    p_nodata = pygeoprocessing.get_nodata_from_uri(precip_path)
-    n_events_nodata = pygeoprocessing.get_nodata_from_uri(n_events_raster_path)
-
-    def qf_op(p_im, s_i, n_events, stream_array):
-        """Calculate quick flow as in Eq [1] in user's guide.
-
-        Parameters:
-            p_im (numpy.array): precipitation at pixel i on month m
-            s_i (numpy.array): factor that is 1000/CN_i - 10
-                (Equation 1b from user's guide)
-            n_events (numpy.array): number of rain events on the pixel
-            stream_mask (numpy.array): 1 if stream, otherwise not a stream
-                pixel.
-
-        Returns:
-            quick flow (numpy.array)
-        """
-        valid_mask = (
-            (p_im != p_nodata) & (s_i != SI_NODATA) & (p_im != 0.0) &
-            (stream_array != 1) & (n_events != n_events_nodata) &
-            (n_events > 0))
-        valid_n_events = n_events[valid_mask]
-        valid_si = s_i[valid_mask]
-
-        # a_im is the mean rain depth on a rainy day at pixel i on month m
-        # the 25.4 converts inches to mm since Si is in inches
-        a_im = numpy.empty(valid_n_events.shape)
-        a_im = p_im[valid_mask] / valid_n_events / 25.4
-        qf_im = numpy.empty(p_im.shape)
-        qf_im[:] = QF_NODATA
-
-        # Precompute the last two terms in quickflow so we can handle a
-        # numerical instability when s_i is large and/or a_im is small
-        # on large valid_si/a_im this number will be zero and the latter
-        # exponent will also be zero because of a divide by zero. rather than
-        # raise that numerical warning, just handle it manually
-        E1 = scipy.special.expn(1, valid_si / a_im)  #pylint: disable=invalid-name,no-member
-        nonzero_e1_mask = E1 != 0
-        exp_result = numpy.zeros(valid_si.shape)
-        exp_result[nonzero_e1_mask] = numpy.exp(
-            (0.8 * valid_si[nonzero_e1_mask]) / a_im[nonzero_e1_mask] +
-            numpy.log(E1[nonzero_e1_mask]))
-
-        # qf_im is the quickflow at pixel i on month m Eq. [1]
-        qf_im[valid_mask] = (25.4 * valid_n_events * (
-            (a_im - valid_si) * numpy.exp(-0.2 * valid_si / a_im) +
-            valid_si ** 2 / a_im * exp_result))
-
-        # if precip is 0, then QF should be zero
-        qf_im[(p_im == 0) | (n_events == 0)] = 0.0
-        # if we're on a stream, set quickflow to the precipitation
-        qf_im[stream_array == 1] = p_im[stream_array == 1]
-        return qf_im
-
-    pygeoprocessing.vectorize_datasets(
-        [precip_path, si_path, n_events_raster_path, stream_path], qf_op,
-        qf_monthly_path, gdal.GDT_Float32, QF_NODATA, pixel_size,
-        'intersection', vectorize_op=False, datasets_are_pre_aligned=True)
-
-
-def _calculate_curve_number_raster(
-        lulc_raster_path, soil_group_path, biophysical_table, cn_path):
-    """Calculate the CN raster from the landcover and soil group rasters.
-
-    Parameters:
-        lulc_raster_path (string): path to landcover raster
-        soil_group_path (string): path to raster indicating soil group where
-            pixel values are in [1,2,3,4]
-        biophysical_table (dict): maps landcover IDs to dictionaries that
-            contain at least the keys 'cn_a', 'cn_b', 'cn_c', 'cn_d', that
-            map to the curve numbers for that landcover and soil type.
-        cn_path (string): path to output curve number raster to be output
-            which will be the dimensions of the intersection of
-            `lulc_raster_path` and `soil_group_path` the cell size of
-            `lulc_raster_path`.
-
-    Returns:
-        None
-    """
-    soil_nodata = pygeoprocessing.get_nodata_from_uri(soil_group_path)
-    map_soil_type_to_header = {
-        1: 'cn_a',
-        2: 'cn_b',
-        3: 'cn_c',
-        4: 'cn_d',
-    }
-    lulc_to_soil = {}
-    lulc_nodata = pygeoprocessing.get_nodata_from_uri(lulc_raster_path)
-    for soil_id, soil_column in map_soil_type_to_header.iteritems():
-        lulc_to_soil[soil_id] = {
-            'lulc_values': [],
-            'cn_values': []
-        }
-        for lucode in sorted(biophysical_table.keys() + [lulc_nodata]):
-            if lucode != lulc_nodata:
-                lulc_to_soil[soil_id]['cn_values'].append(
-                    biophysical_table[lucode][soil_column])
-                lulc_to_soil[soil_id]['lulc_values'].append(lucode)
-            else:
-                # handle the lulc nodata with cn nodata
-                lulc_to_soil[soil_id]['lulc_values'].append(lulc_nodata)
-                lulc_to_soil[soil_id]['cn_values'].append(CN_NODATA)
-
-        # Making the array an int64 to make sure it's big enough to handle
-        # both signed and unsigned int32 values
-        lulc_to_soil[soil_id]['lulc_values'] = (
-            numpy.array(lulc_to_soil[soil_id]['lulc_values'],
-                        dtype=numpy.int64))
-        lulc_to_soil[soil_id]['cn_values'] = (
-            numpy.array(lulc_to_soil[soil_id]['cn_values'],
-                        dtype=numpy.float32))
-
-    def cn_op(lulc_array, soil_group_array):
-        """Map lulc code and soil to a curve number."""
-        cn_result = numpy.empty(lulc_array.shape)
-        cn_result[:] = CN_NODATA
-        for soil_group_id in numpy.unique(soil_group_array):
-            if soil_group_id == soil_nodata:
-                continue
-            current_soil_mask = (soil_group_array == soil_group_id)
-            index = numpy.digitize(
-                lulc_array.ravel(),
-                lulc_to_soil[soil_group_id]['lulc_values'], right=True)
-            cn_values = (
-                lulc_to_soil[soil_group_id]['cn_values'][index]).reshape(
-                    lulc_array.shape)
-            cn_result[current_soil_mask] = cn_values[current_soil_mask]
-        return cn_result
-
-    pixel_size = pygeoprocessing.get_cell_size_from_uri(lulc_raster_path)
-    pygeoprocessing.vectorize_datasets(
-        [lulc_raster_path, soil_group_path], cn_op, cn_path, gdal.GDT_Float32,
-        CN_NODATA, pixel_size, 'intersection', vectorize_op=False,
-        datasets_are_pre_aligned=True)
-
-
-def _calculate_si_raster(cn_path, stream_path, si_path):
-    """Calculate the S factor of the quickflow equation [1].
-
-    Parameters:
-        cn_path (string): path to curve number raster
-        stream_path (string): path to a stream raster (0, 1)
-        si_path (string): path to output s_i raster
-
-    Returns:
-        None
-    """
-    cn_nodata = pygeoprocessing.get_nodata_from_uri(cn_path)
-
-    def si_op(ci_factor, stream_mask):
-        """Calculate si factor."""
-        valid_mask = (ci_factor != cn_nodata) & (ci_factor > 0)
-        si_array = numpy.empty(ci_factor.shape)
-        si_array[:] = SI_NODATA
-        # multiply by the stream mask != 1 so we get 0s on the stream and
-        # unaffected results everywhere else
-        si_array[valid_mask] = (
-            (1000.0 / ci_factor[valid_mask] - 10) * (
-                stream_mask[valid_mask] != 1))
-        return si_array
-
-    pixel_size = pygeoprocessing.get_cell_size_from_uri(cn_path)
-    pygeoprocessing.vectorize_datasets(
-        [cn_path, stream_path], si_op, si_path, gdal.GDT_Float32,
-        SI_NODATA, pixel_size, 'intersection', vectorize_op=False,
-        datasets_are_pre_aligned=True)
-
-
-def _aggregate_recharge(
-        aoi_path, l_path, vri_path, aggregate_vector_path):
-    """Aggregate recharge values for the provided watersheds/AOIs.
-
-    Generates a new shapefile that's a copy of 'aoi_path' in sum values from L
-    and Vri.
-
-    Parameters:
-        aoi_path (string): path to shapefile that will be used to
-            aggregate rasters
-        l_path (string): path to (L) local recharge raster
-        vri_path (string): path to Vri raster
-        aggregate_vector_path (string): path to shapefile that will be created
-            by this function as the aggregating output.  will contain fields
-            'l_sum' and 'vri_sum' per original feature in `aoi_path`.  If this
-            file exists on disk prior to the call it is overwritten with
-            the result of this call.
-
-    Returns:
-        None
-    """
-    if os.path.exists(aggregate_vector_path):
-        LOGGER.warn(
-            '%s exists, deleting and writing new output',
-            aggregate_vector_path)
-        os.remove(aggregate_vector_path)
-
-    esri_driver = ogr.GetDriverByName('ESRI Shapefile')
-    original_aoi_vector = ogr.Open(aoi_path)
-
-    esri_driver.CopyDataSource(
-        original_aoi_vector, aggregate_vector_path)
-    esri_driver = None
-    ogr.DataSource.__swig_destroy__(original_aoi_vector)
-    original_aoi_vector = None
-    aggregate_vector = ogr.Open(aggregate_vector_path, 1)
-    aggregate_layer = aggregate_vector.GetLayer()
-
-    # make an identifying id per polygon that can be used for aggregation
-    while True:
-        serviceshed_defn = aggregate_layer.GetLayerDefn()
-        poly_id_field = str(uuid.uuid4())[-8:]
-        if serviceshed_defn.GetFieldIndex(poly_id_field) == -1:
-            break
-    layer_id_field = ogr.FieldDefn(poly_id_field, ogr.OFTInteger)
-    aggregate_layer.CreateField(layer_id_field)
-    for poly_index, poly_feat in enumerate(aggregate_layer):
-        poly_feat.SetField(poly_id_field, poly_index)
-        aggregate_layer.SetFeature(poly_feat)
-    aggregate_layer.SyncToDisk()
-
-    for raster_path, aggregate_field_id, op_type in [
-            (l_path, 'qb', 'mean'), (vri_path, 'vri_sum', 'sum')]:
-
-        # aggregate carbon stocks by the new ID field
-        aggregate_stats = pygeoprocessing.aggregate_raster_values_uri(
-            raster_path, aggregate_vector_path,
-            shapefile_field=poly_id_field, ignore_nodata=True,
-            threshold_amount_lookup=None, ignore_value_list=[],
-            process_pool=None, all_touched=False)
-
-        aggregate_field = ogr.FieldDefn(aggregate_field_id, ogr.OFTReal)
-        aggregate_layer.CreateField(aggregate_field)
-
-        aggregate_layer.ResetReading()
-        for poly_index, poly_feat in enumerate(aggregate_layer):
-            if op_type == 'mean':
-                value = (aggregate_stats.total[poly_index] /
-                         aggregate_stats.n_pixels[poly_index])
-            elif op_type == 'sum':
-                value = aggregate_stats.total[poly_index]
-            poly_feat.SetField(aggregate_field_id, value)
-            aggregate_layer.SetFeature(poly_feat)
-
-    # don't need a random poly id anymore
-    aggregate_layer.DeleteField(
-        serviceshed_defn.GetFieldIndex(poly_id_field))
-    aggregate_layer.SyncToDisk()
-    aggregate_layer = None
-    ogr.DataSource.__swig_destroy__(aggregate_vector)
-    aggregate_vector = None
-
-
-def _sum_valid(raster_path):
-    """Calculate the sum of the non-nodata pixels in the raster.
-
-    Parameters:
-        raster_path (string): path to raster on disk
-
-    Returns:
-        (sum, n_pixels) tuple where sum is the sum of the non-nodata pixels
-        and n_pixels is the count of them
-    """
-    raster_sum = 0
-    raster_count = 0
-    raster_nodata = pygeoprocessing.get_nodata_from_uri(raster_path)
-
-    for _, block in pygeoprocessing.iterblocks(raster_path, band_list=[1]):
-        valid_mask = block != raster_nodata
-        raster_sum += numpy.sum(block[valid_mask])
-        raster_count += numpy.count_nonzero(valid_mask)
-    return raster_sum, raster_count
 
 
 def _mask_any_nodata(input_raster_path_list, output_raster_path_list):
@@ -1212,6 +867,71 @@ def _calculate_subsidized_area(
         subsidized_raster = None
 
 
+def _calculate_upstream_flow(
+        flow_direction_path, dem_path, source_path, aoi_path,
+        out_upstream_source_path):
+    """Calculate upstream flow of source to pixel.
+
+    Parameters:
+        flow_direction_path (string): path to a raster that indicates the
+            d-infinity flow direction per pixel.
+        dem_path (string): path to DEM raster.
+        aoi_path (string): path to AOI vector.
+        out_upstream_source_path (string): path to output file that contains
+            the sum of upstream flow from the `flow_direction_path` raster.
+
+    Returns:
+        None.
+    """
+    zero_absorption_source_path = pygeoprocessing.temporary_filename()
+    loss_path = pygeoprocessing.temporary_filename()
+
+    pygeoprocessing.make_constant_raster_from_base_uri(
+        dem_path, 0.0, zero_absorption_source_path)
+
+    pygeoprocessing.routing.route_flux(
+        flow_direction_path, dem_path, source_path,
+        zero_absorption_source_path, loss_path, out_upstream_source_path,
+        'flux_only', aoi_uri=aoi_path, include_source=True)
+
+    os.remove(zero_absorption_source_path)
+    os.remove(loss_path)
+
+
+def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
+    """Calculate L by combining L1, L2, in correct subsidized areas.
+
+    Parameters:
+        l1_path (string): path to upland flow
+        l2_path (string): path to subsidized flow
+        subsidized_mask_path (string): path to raster mask whose pixels are
+            1 where subsidized flow should relpace upland
+        l_out_path (string): path to output flow.
+
+    Returns:
+        None.
+    """
+    def _l_op(l1_array, l2_array, subsidized_mask_array):
+        """Combine L1 into L2 where subsidized area != 1."""
+        valid_mask = (
+            (l1_array != L1_NODATA) &
+            (l2_array != L2_NODATA))
+
+        result = numpy.empty(l1_array.shape)
+        result[:] = L_NODATA
+        result[valid_mask] = l1_array[valid_mask]
+
+        l2_mask = (subsidized_mask_array == 1) & valid_mask
+        result[l2_mask] = l2_array[l2_mask]
+        return result
+
+    cell_size = pygeoprocessing.get_cell_size_from_uri(l1_path)
+    pygeoprocessing.vectorize_datasets(
+        [l1_path, l2_path, subsidized_mask_path], _l_op, l_out_path,
+        gdal.GDT_Float32, L_NODATA, cell_size, 'intersection',
+        vectorize_op=False, datasets_are_pre_aligned=True)
+
+
 class _OutOfCoreNumpyArray(object):
     """Abstraction of a numpy array that can sort out of core."""
 
@@ -1324,68 +1044,3 @@ class _OutOfCoreNumpyArray(object):
                 out_file.write(
                     struct.pack('f'*len(array), *(scale * array[argsort])))
                 self.array_dict[key] = numpy.array([])
-
-
-def _calculate_upstream_flow(
-        flow_direction_path, dem_path, source_path, aoi_path,
-        out_upstream_source_path):
-    """Calculate upstream flow of source to pixel.
-
-    Parameters:
-        flow_direction_path (string): path to a raster that indicates the
-            d-infinity flow direction per pixel.
-        dem_path (string): path to DEM raster.
-        aoi_path (string): path to AOI vector.
-        out_upstream_source_path (string): path to output file that contains
-            the sum of upstream flow from the `flow_direction_path` raster.
-
-    Returns:
-        None.
-    """
-    zero_absorption_source_path = pygeoprocessing.temporary_filename()
-    loss_path = pygeoprocessing.temporary_filename()
-
-    pygeoprocessing.make_constant_raster_from_base_uri(
-        dem_path, 0.0, zero_absorption_source_path)
-
-    pygeoprocessing.routing.route_flux(
-        flow_direction_path, dem_path, source_path,
-        zero_absorption_source_path, loss_path, out_upstream_source_path,
-        'flux_only', aoi_uri=aoi_path, include_source=True)
-
-    os.remove(zero_absorption_source_path)
-    os.remove(loss_path)
-
-
-def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
-    """Calculate L by combining L1, L2, in correct subsidized areas.
-
-    Parameters:
-        l1_path (string): path to upland flow
-        l2_path (string): path to subsidized flow
-        subsidized_mask_path (string): path to raster mask whose pixels are
-            1 where subsidized flow should relpace upland
-        l_out_path (string): path to output flow.
-
-    Returns:
-        None.
-    """
-    def _l_op(l1_array, l2_array, subsidized_mask_array):
-        """Combine L1 into L2 where subsidized area != 1."""
-        valid_mask = (
-            (l1_array != L1_NODATA) &
-            (l2_array != L2_NODATA))
-
-        result = numpy.empty(l1_array.shape)
-        result[:] = L_NODATA
-        result[valid_mask] = l1_array[valid_mask]
-
-        l2_mask = (subsidized_mask_array == 1) & valid_mask
-        result[l2_mask] = l2_array[l2_mask]
-        return result
-
-    cell_size = pygeoprocessing.get_cell_size_from_uri(l1_path)
-    pygeoprocessing.vectorize_datasets(
-        [l1_path, l2_path, subsidized_mask_path], _l_op, l_out_path,
-        gdal.GDT_Float32, L_NODATA, cell_size, 'intersection',
-        vectorize_op=False, datasets_are_pre_aligned=True)

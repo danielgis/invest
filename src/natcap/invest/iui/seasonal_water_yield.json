@@ -4,8 +4,8 @@
   "targetScript": "natcap.invest.seasonal_water_yield.seasonal_water_yield",
   "modelName": "seasonal_water_yield",
   "localDocURI": "../documentation/seasonalwateryield.html",
-  "height": 740,
-  "width": 900,
+  "height": 570,
+  "width": 700,
   "elements": [
     {
       "id": "workspace_list",
@@ -31,16 +31,6 @@
           "returns": {
             "ifEmpty": "pass"
           }
-        },
-        {
-          "id": "threshold_flow_accumulation",
-          "args_id": "threshold_flow_accumulation",
-          "type": "text",
-          "label": "Threshold Flow Accumulation",
-          "defaultValue": "1000",
-          "required": true,
-          "validText": "^[0-9]+$",
-          "helpText": "The number of upstream cells that must flow into a cell before it's considered part of a stream such that retention stops and the remaining export is exported to the stream. Used to define streams from the DEM."
         },
         {
           "id": "qb_value",
@@ -180,7 +170,8 @@
               "cz_id", "jan", "feb", "mar", "apr", "may", "jun", "jul",
               "aug", "sep", "oct", "nov", "dec"
             ]
-          }
+          },
+          "helpText": "This table describes the number of rain events per month per climate zone.  If there is no climate zone raster provided, the model assumes the climate zone is uniform across the entire raster input and uses the values in the first entry of this table.  Otherwise rain events are mapped from the 'cz_id' field to corresponding pixels in the climate zone raster."
         },
         {
           "id": "climate_zone_raster_path",
@@ -192,7 +183,7 @@
           "validateAs": {
             "type": "GDAL"
           },
-          "helpText": "Map of climate zones that are found in the Climate Zone Table input.  Pixel values correspond to cz_id."
+          "helpText": "Optional map of climate zones that are found in the Climate Zone Table input.  Pixel values correspond to cz_id field in the table."
         }
       ]
     }
