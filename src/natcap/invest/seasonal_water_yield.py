@@ -10,7 +10,6 @@ import re
 import uuid
 import warnings
 
-import scipy.special
 import numpy
 from osgeo import gdal
 from osgeo import ogr
@@ -18,8 +17,6 @@ import pygeoprocessing
 import pygeoprocessing.routing
 import pygeoprocessing.routing.routing_core
 import utils
-
-import seasonal_water_yield_core  # pylint: disable=import-error
 
 logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
@@ -212,7 +209,9 @@ def _execute(args):
         file_registry['pawc_aligned_path'],
         file_registry['soil_depth_aligned_path']]
 
-    if 'climate_zone_raster_path' in args:
+    # make sure climate zone raster path isn't an empty string
+    if ('climate_zone_raster_path' in args and
+            args['climate_zone_raster_path']):
         input_align_list.append(args['climate_zone_raster_path'])
         output_align_list.append(file_registry['cz_aligned_raster_path'])
 
@@ -220,8 +219,7 @@ def _execute(args):
     et0_path_list = []
 
     et0_dir_list = [
-        os.path.join(args['et0_dir'], f) for f in os.listdir(
-            args['et0_dir'])]
+        os.path.join(args['et0_dir'], f) for f in os.listdir(args['et0_dir'])]
     precip_dir_list = [
         os.path.join(args['precip_dir'], f) for f in os.listdir(
             args['precip_dir'])]
@@ -250,17 +248,19 @@ def _execute(args):
 
     align_index = len(input_align_list) - 1  # this aligns with the DEM
     interpolate_list = ['nearest'] * len(input_align_list)
-
+    LOGGER.debug(input_align_list)
+    LOGGER.debug(output_align_list)
     pygeoprocessing.align_dataset_list(
         input_align_list, output_align_list, interpolate_list, pixel_size,
         'intersection', align_index, aoi_uri=args['aoi_path'],
         assert_datasets_projected=True)
 
-    if 'climate_zone_raster_path' not in args:
+    if ('climate_zone_raster_path' not in args or
+            not args['climate_zone_raster_path']):
         # Create a constant climate zone raster, there is only one entry so
         # use that CZ id for the fill value in the raster
         climate_zone_id = cz_rain_events_lookup.keys()[0]
-        # this if statement makes sure we don't overflow
+        # the following makes sure we don't integer overflow
         if climate_zone_id > 0:
             climate_zone_nodata = climate_zone_id - 1
         else:
@@ -293,8 +293,9 @@ def _execute(args):
         exception_flag='values_required', assert_dataset_projected=True)
 
     kc_lookup = {}
-    LOGGER.info('classify kc')
-    for month_index in xrange(12):
+    for month_index in xrange(_N_MONTHS):
+        LOGGER.info("For month %d: ", month_index)
+        LOGGER.info('classify kc')
         kc_lookup = dict([
             (lucode, biophysical_table[lucode]['kc_%d' % (month_index+1)])
             for lucode in biophysical_table])
@@ -302,10 +303,6 @@ def _execute(args):
             file_registry['lulc_valid_path'], kc_lookup,
             file_registry['kc_path_list'][month_index], gdal.GDT_Float32,
             KC_NODATA)
-
-    LOGGER.info('loading number of monthly events')
-    for month_index in xrange(_N_MONTHS):
-        LOGGER.info("For month %d: ", month_index)
         month_label = MONTH_ID_TO_LABEL[month_index]
         climate_zone_rain_events_month = dict([
             (cz_id, cz_rain_events_lookup[cz_id][month_label]) for
@@ -337,8 +334,7 @@ def _execute(args):
 
     LOGGER.info('flow direction')
     pygeoprocessing.routing.flow_direction_d_inf(
-        file_registry['dem_valid_path'],
-        file_registry['flow_dir_path'])
+        file_registry['dem_valid_path'], file_registry['flow_dir_path'])
 
     LOGGER.info('flow weights')
     pygeoprocessing.routing.routing_core.calculate_flow_weights(
@@ -348,8 +344,7 @@ def _execute(args):
 
     LOGGER.info('flow accumulation')
     pygeoprocessing.routing.flow_accumulation(
-        file_registry['flow_dir_path'],
-        file_registry['dem_valid_path'],
+        file_registry['flow_dir_path'], file_registry['dem_valid_path'],
         file_registry['flow_accum_path'])
 
     LOGGER.info('calculate slope')
@@ -373,6 +368,7 @@ def _execute(args):
 
     for month_index in xrange(_N_MONTHS):
         LOGGER.info("For month %d: ", month_index)
+        LOGGER.info("calculate L2_%d", month_index)
         _calculate_upstream_flow(
             file_registry['flow_dir_path'],
             file_registry['dem_valid_path'],
@@ -385,6 +381,7 @@ def _execute(args):
             file_registry['l2_path_list'][month_index], gdal.GDT_Float32,
             L2_NODATA, pixel_size, "intersection",
             datasets_are_pre_aligned=True, vectorize_op=False)
+        LOGGER.info("calculate subsided area for month %d", month_index)
         _calculate_subsidized_area(
             qb_value, file_registry['l1_path_list'][month_index],
             file_registry['l1_upstream_path_list'][month_index],
@@ -392,6 +389,7 @@ def _execute(args):
             file_registry['pet_path_aligned_list'][month_index],
             file_registry['ti_path'], args['aoi_path'],
             file_registry['subsidized_path_list'][month_index])
+        LOGGER.info("calculate L_%d", month_index)
         _calculate_l(
             file_registry['l1_path_list'][month_index],
             file_registry['l2_path_list'][month_index],
@@ -432,20 +430,17 @@ def _execute(args):
         vectorize_op=False)
 
     _calculate_upstream_flow(
-        file_registry['flow_dir_path'],
-        file_registry['dem_valid_path'],
+        file_registry['flow_dir_path'], file_registry['dem_valid_path'],
         file_registry['l1_annual_path'], args['aoi_path'],
         file_registry['l1_annual_upstream_path'])
     _calculate_subsidized_area(
         qb_value, file_registry['l1_annual_path'],
         file_registry['l1_annual_upstream_path'],
-        file_registry['l2_annual_path'],
-        file_registry['pet_annual_path'],
+        file_registry['l2_annual_path'], file_registry['pet_annual_path'],
         file_registry['ti_path'], args['aoi_path'],
         file_registry['subsidized_annual_path'])
     _calculate_l(
-        file_registry['l1_annual_path'],
-        file_registry['l2_annual_path'],
+        file_registry['l1_annual_path'], file_registry['l2_annual_path'],
         file_registry['subsidized_annual_path'],
         file_registry['l_annual_path'])
 
@@ -608,8 +603,7 @@ def _calculate_aet_uphill(
         valid_mask = (
             (pet_array != PET_NODATA) &
             (root_depth_array != root_depth_nodata) &
-            (w_m_array != AET_NODATA) &
-            (z_rm_array != AET_NODATA))
+            (w_m_array != AET_NODATA) & (z_rm_array != AET_NODATA))
 
         try:
             # This section isolates positive versus negative exponents so that
@@ -820,6 +814,8 @@ def _calculate_subsidized_area(
         low_enough = 0
         too_high = l1_array.size
 
+        # This loop does a binary search for an optimal cut and can handle
+        # the case where no elements would add to the solution.
         while True:
             cut_index = (too_high + low_enough) // 2
             running_sum = (
@@ -832,7 +828,6 @@ def _calculate_subsidized_area(
                     break
             else:
                 too_high = cut_index
-
             if low_enough == too_high:
                 cut_index = -1
                 break
@@ -863,8 +858,6 @@ def _calculate_subsidized_area(
                 yoff=block_info['yoff'])
         subsidized_band.FlushCache()
         subsidized_raster.FlushCache()
-        subsidized_band = None
-        subsidized_raster = None
 
 
 def _calculate_upstream_flow(
@@ -913,9 +906,7 @@ def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
     """
     def _l_op(l1_array, l2_array, subsidized_mask_array):
         """Combine L1 into L2 where subsidized area != 1."""
-        valid_mask = (
-            (l1_array != L1_NODATA) &
-            (l2_array != L2_NODATA))
+        valid_mask = (l1_array != L1_NODATA) & (l2_array != L2_NODATA)
 
         result = numpy.empty(l1_array.shape)
         result[:] = L_NODATA
@@ -935,15 +926,13 @@ def _calculate_l(l1_path, l2_path, subsidized_mask_path, l_out_path):
 class _OutOfCoreNumpyArray(object):
     """Abstraction of a numpy array that can sort out of core."""
 
-    _MAX_SIZE = 40000
+    _MAX_SIZE = 2**22
 
     def __init__(self, working_dir, primary_key):
         """Construct an empty out of core array."""
         self.array_dict = collections.defaultdict(lambda: numpy.array([]))
         self.working_dir = working_dir
         self.primary_key = primary_key
-
-        # keep track of sorted files
         self.array_files_dict = collections.defaultdict(list)
 
     def __del__(self):
@@ -959,7 +948,6 @@ class _OutOfCoreNumpyArray(object):
                  len(array_dict[first_key])) > self._MAX_SIZE):
             # save off all the current arrays to files
             self._sort()
-
         for key, array in array_dict.iteritems():
             self.array_dict[key] = numpy.append(array, self.array_dict[key])
 
@@ -1003,7 +991,7 @@ class _OutOfCoreNumpyArray(object):
     def iterarray(self, key):
         """Iterate over a keyed array in memory chunks."""
         self._sort()
-        chunk_size = 1000
+        chunk_size = 2**12
 
         array_iterator = heapq.merge(*[
             _OutOfCoreNumpyArray._read_buffer(
@@ -1027,9 +1015,7 @@ class _OutOfCoreNumpyArray(object):
         """Out of core argsort on array."""
         if len(self.array_dict[self.primary_key]) == 0:
             return
-
         argsort = numpy.argsort(-self.array_dict[self.primary_key])
-
         for key, array in self.array_dict.iteritems():
             # this section ensures that the primary key is storted as it is
             # sorted with a negative above
