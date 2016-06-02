@@ -248,8 +248,6 @@ def _execute(args):
 
     align_index = len(input_align_list) - 1  # this aligns with the DEM
     interpolate_list = ['nearest'] * len(input_align_list)
-    LOGGER.debug(input_align_list)
-    LOGGER.debug(output_align_list)
     pygeoprocessing.align_dataset_list(
         input_align_list, output_align_list, interpolate_list, pixel_size,
         'intersection', align_index, aoi_uri=args['aoi_path'],
