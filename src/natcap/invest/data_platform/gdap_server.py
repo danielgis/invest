@@ -1,4 +1,4 @@
-"""Data server implementation"""
+"""Data server implementation."""
 
 import os
 import sys
@@ -10,7 +10,6 @@ import hashlib
 import shutil
 
 import shapely
-from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
 import Pyro4
@@ -27,8 +26,7 @@ Pyro4.config.SERIALIZER = 'marshal'  # lets us pass null bytes in strings
 
 
 def path_to_zip_string(path):
-    """Recursively zips the files in the path and returns a binary string that
-    is a zipfile of those data.
+    """Zip files in path and return as a binary string.
 
     Parameters:
         path (string): path in which to recursively gather files into zipfile
@@ -37,7 +35,6 @@ def path_to_zip_string(path):
         a binary string which can be written to disk as a zipfile archive of
         the files and directories under `path`
     """
-
     tmp_fd, tmp_path = tempfile.mkstemp(suffix='.zip')
     abs_path = os.path.abspath(path)
     with zipfile.ZipFile(tmp_path, 'w') as out_zip_file:
@@ -56,8 +53,7 @@ def path_to_zip_string(path):
 
 
 class DataServer(object):
-    """Pyro4 RPC server for advertising and serving data required to run InVEST
-    """
+    """Pyro4 RPC server for serving data required to run InVEST."""
 
     _STATIC_DATA_TYPES = [
         'dem',
@@ -91,8 +87,8 @@ class DataServer(object):
                 predefined data schema.
 
         Returns:
-            None."""
-
+            None.
+        """
         self.database_filepath = database_filepath
         filepath_directory = os.path.dirname(self.database_filepath)
         if filepath_directory != '' and not os.path.exists(filepath_directory):
@@ -109,8 +105,11 @@ class DataServer(object):
         db_connection.close()
 
     def fetch_data_tile(self, bounding_box, data_id):
-        """Return a binary raster or vector zipfile string clipped to the
-        bounding box of the indicated id
+        """Return raster or vector data clipped to the bounding box.
+
+        This function returns a zipfile encoded as a binary string that
+        contains the vector or raster data of `data_id` clipped to the
+        bounds of `bounding_box`.
 
         Parameters:
             bounding_box (list): lat/lng of bounding box of the form
@@ -121,7 +120,6 @@ class DataServer(object):
             binary string that can be saved as a zipfile that contains the
             clipped requested data
         """
-
         # Make a bounding box polygon for clipping
         bounding_box_dir = tempfile.mkdtemp()
         bounding_box_path = os.path.join(
@@ -171,10 +169,11 @@ class DataServer(object):
 
         return result
 
-
     def add_search_directory(self, search_directory_list):
-        """Recursively search through a list of directories and add any viable
-        GIS data types to the database.
+        """Search through directories for viable GIS data.
+
+        Searches through the directories in `search_directory_list` and adds
+        any data found there to the database.
 
         Parameters:
             search_directory_list (list): A list of directory paths in which to
@@ -284,12 +283,11 @@ class DataServer(object):
 
     @staticmethod
     def get_server_version():
-        """Returns a server version string to the client"""
+        """Return server version string to the client."""
         return natcap.invest.__version__
 
     def get_data_coverage(self, bounding_box, data_type_list):
-        """Returns a list of (data_id, datatype) pairs that can be retrieved
-        with `fetch_data_tile`
+        """Return list of data that are contained by bounding_box.
 
         Parameters:
             bounding_box (list): in WSG84 projection:
@@ -337,8 +335,7 @@ class DataServer(object):
         return result_list
 
     def get_data_preview(self):
-        """Build an OpenLayers based HTML preview page that highlights the
-        GIS data sources' bounding boxes on a global map.
+        """Build HTML data coverage map..
 
         Parameters:
             none
@@ -371,7 +368,6 @@ class DataServer(object):
         selection_command = (
             "SELECT data_type, gis_type, bounding_box, path "
             "FROM %s " % self._DATA_TABLE_NAME + ";")
-            #" WHERE data_type = '%s';" % data_type)
         LOGGER.debug(selection_command)
         db_cursor.execute(selection_command)
 
@@ -642,7 +638,7 @@ table {
 
 
 def launch_data_server(data_directory, hostname, port):
-    """Function to start a remote procedure call server
+    """Start a remote procedure call DataServer.
 
     Parameters:
         database_filepath (string): local filepath to the sqlite database
@@ -650,8 +646,8 @@ def launch_data_server(data_directory, hostname, port):
         port (int): TCP port to bind to
 
     Returns:
-        never"""
-
+        never
+    """
     daemon = Pyro4.Daemon(hostname, port)
     uri = daemon.register(
         DataServer(data_directory),
