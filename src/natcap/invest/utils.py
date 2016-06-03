@@ -5,7 +5,7 @@ import os
 import numpy
 from osgeo import gdal
 from osgeo import osr
-from osgeo import osr
+from osgeo import ogr
 import pygeoprocessing
 
 
