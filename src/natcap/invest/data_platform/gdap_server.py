@@ -1,4 +1,4 @@
-"""Data server implementation."""
+"""Data Platform Server modules."""
 
 import os
 import sys
@@ -182,6 +182,11 @@ class DataServer(object):
         Returns:
             None
         """
+        if not isinstance(search_directory_list, list):
+            raise ValueError(
+                "%s should be a list of directories instead got "
+                "unexpected value" % search_directory_list)
+
         raster_paths = []
         vector_paths = []
 

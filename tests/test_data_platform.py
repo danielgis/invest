@@ -32,3 +32,14 @@ class DataPlatformTests(unittest.TestCase):
         database_filepath = os.path.join(self.workspace_dir, 'database.db')
         dataserver = gdap_server.DataServer(database_filepath)
         self.assertTrue(dataserver)
+        dataserver.add_search_directory([TEST_DATA])
+
+    def test_string_passed_as_list(self):
+        """Data Platform: ensure ValueError on bad search_directory args."""
+        from natcap.invest.data_platform import gdap_server
+
+        database_filepath = os.path.join(self.workspace_dir, 'database.db')
+        dataserver = gdap_server.DataServer(database_filepath)
+        self.assertTrue(dataserver)
+        self.assertRaises(
+            ValueError, dataserver.add_search_directory, TEST_DATA)
