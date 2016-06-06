@@ -295,10 +295,11 @@ class DataServer(object):
         """Return list of data that are contained by bounding_box.
 
         Parameters:
-            bounding_box (list): in WSG84 projection:
+            bounding_box (list): in WSG84 projection in the order
                 [x_min, y_max, x_max, y_min]
             data_type_list (list): a list of strings that can be found in
-            self._STATIC_DATA_TYPES.  If empty list, ALL types are returned.
+                self._STATIC_DATA_TYPES.  If empty list, ALL types are
+                returned.
 
         Returns:
             List of (data_id, datatype) pairs where the data_id can be
