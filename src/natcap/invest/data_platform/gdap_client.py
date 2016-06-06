@@ -1,4 +1,4 @@
-"""Data client implementation"""
+"""GDAP client implementation."""
 
 import logging
 import urllib
@@ -10,8 +10,8 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 
 LOGGER = logging.getLogger('natcap.invest.data_platform.data_server')
 
-INVEST_USAGE_LOGGER_URL = ('http://data.naturalcapitalproject.org/'
-                           'server_registry/data_hosts/')
+INVEST_USAGE_LOGGER_URL = (
+    'http://data.naturalcapitalproject.org/server_registry/data_hosts/')
 
 Pyro4.config.SERIALIZER = 'marshal'  # lets us pass null bytes in strings
 
