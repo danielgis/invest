@@ -1,5 +1,6 @@
 """Data Platform Server modules."""
 
+import glob
 import os
 import sys
 import tempfile
@@ -25,7 +26,7 @@ LOGGER = logging.getLogger('natcap.invest.data_platform.data_server')
 Pyro4.config.SERIALIZER = 'marshal'  # lets us pass null bytes in strings
 
 
-def path_to_zip_string(path):
+def binaryzip_path(path):
     """Zip files in path and return as a binary string.
 
     Parameters:
@@ -75,6 +76,7 @@ class DataServer(object):
         ('bounding_box', ' text'),
         ('path', ' text'),
         ('path_hash', ' text PRIMARY KEY'),
+        ('cs_epsg', ' text'),
     ]
 
     def __init__(self, database_filepath):
@@ -90,8 +92,9 @@ class DataServer(object):
             None.
         """
         self.database_filepath = database_filepath
-        filepath_directory = os.path.dirname(self.database_filepath)
-        if filepath_directory != '' and not os.path.exists(filepath_directory):
+        self.filepath_directory = os.path.dirname(self.database_filepath)
+        if self.filepath_directory != '' and not os.path.exists(
+                self.filepath_directory):
             os.mkdir(os.path.dirname(self.database_filepath))
 
         db_connection = sqlite3.connect(self.database_filepath)
@@ -162,7 +165,7 @@ class DataServer(object):
             path, bounding_box_path, out_raster_path, assert_projections=False,
             all_touched=True)
 
-        result = path_to_zip_string(working_dir)
+        result = binaryzip_path(working_dir)
         # clean up intermediate result
         shutil.rmtree(working_dir)
         shutil.rmtree(bounding_box_dir)
@@ -291,7 +294,65 @@ class DataServer(object):
         """Return server version string to the client."""
         return natcap.invest.__version__
 
-    def get_data_coverage(self, bounding_box, data_type_list):
+    def get_data_coverage_polygon(self, vector_as_zip_binary, data_type_list):
+        """Return a list of data that are covered by the vector.
+
+        Parameters:
+            vector_as_zip_binary (string): an ESRI Shapefile that is stored
+                as a binary zip string.
+            data_type_list (list): a list of strings that can be found in
+                self._STATIC_DATA_TYPES.  If empty list, ALL types are
+                returned.
+
+        Returns:
+            a list of data coverage in the form of
+            `(data_id, datatype, data_covered, vector_coverage)` where
+                `data_id` is a unique identifier used to fetch raw data tiles,
+                `datatype` is one of the strings in
+                    `DataServer._STATIC_DATA_TYPES`
+                `data_covered` is a float in [0..1] indicating what proportion
+                    of the dataset is covered by the vector
+                `vector_coverage` is a float in [0..1] that indicates what
+                    proportion of the input vector is covered by that data
+                    entry
+        """
+        # make temporary directory in filepath_directory and unzip the
+        # vector there
+        #workspace_path = tempfile.mkdtemp(dir=self.filepath_directory)
+        if not os.path.exists('foo'):
+            os.mkdir('foo')
+        workspace_path = tempfile.mkdtemp(dir='foo')
+        zip_vector_filename = os.path.join(workspace_path, 'zip_vector.zip')
+        with open(zip_vector_filename, 'wb') as zip_vector_file:
+            zip_vector_file.write(vector_as_zip_binary)
+
+        with zipfile.ZipFile(zip_vector_filename, 'r') as shapefile_archive:
+            shapefile_archive.extractall(workspace_path)
+        aoi_path = glob.glob(os.path.join(workspace_path, '*.shp'))[0]
+
+        aoi_vector = ogr.Open(aoi_path)
+        aoi_layer = aoi_vector.GetLayer()
+        aoi_srs = aoi_layer.GetSpatialRef()
+
+        lat_lng_srs = osr.SpatialReference()
+        lat_lng_srs.ImportFromEPSG(4632)
+
+        LOGGER.debug(aoi_layer.GetExtent())
+        bounding_box = pygeoprocessing.transform_bounding_box(
+            (lambda p: (p[0], p[2], p[1], p[3]))(aoi_layer.GetExtent()),
+            aoi_srs.ExportToWkt(), lat_lng_srs.ExportToWkt())
+        LOGGER.debug(bounding_box)
+
+        # clean up the temporary directory when we're done!
+        aoi_srs = None
+        aoi_layer = None
+        aoi_vector = None
+        shutil.rmtree(workspace_path)
+
+        return self.get_data_coverage_bounding_box(
+            bounding_box, data_type_list)
+
+    def get_data_coverage_bounding_box(self, bounding_box, data_type_list):
         """Return list of data that are contained by bounding_box.
 
         Parameters:
@@ -637,7 +698,7 @@ table {
 </body>
 </html>""")
         webpage_out.close()
-        result = path_to_zip_string(working_dir)
+        result = binaryzip_path(working_dir)
         # clean up intermediate result
         shutil.rmtree(working_dir)
         return result
