@@ -306,22 +306,14 @@ class DataServer(object):
 
         Returns:
             a list of data coverage in the form of
-            `(data_id, datatype, data_covered, vector_coverage)` where
+            `(data_id, datatype, proportion_covered)` where
                 `data_id` is a unique identifier used to fetch raw data tiles,
                 `datatype` is one of the strings in
-                    `DataServer._STATIC_DATA_TYPES`
-                `data_covered` is a float in [0..1] indicating what proportion
-                    of the dataset is covered by the vector
-                `vector_coverage` is a float in [0..1] that indicates what
-                    proportion of the input vector is covered by that data
-                    entry
+                    `DataServer._STATIC_DATA_TYPES`.
         """
         # make temporary directory in filepath_directory and unzip the
         # vector there
-        #workspace_path = tempfile.mkdtemp(dir=self.filepath_directory)
-        if not os.path.exists('foo'):
-            os.mkdir('foo')
-        workspace_path = tempfile.mkdtemp(dir='foo')
+        workspace_path = tempfile.mkdtemp(dir=self.filepath_directory)
         zip_vector_filename = os.path.join(workspace_path, 'zip_vector.zip')
         with open(zip_vector_filename, 'wb') as zip_vector_file:
             zip_vector_file.write(vector_as_zip_binary)
@@ -337,11 +329,9 @@ class DataServer(object):
         lat_lng_srs = osr.SpatialReference()
         lat_lng_srs.ImportFromEPSG(4632)
 
-        LOGGER.debug(aoi_layer.GetExtent())
         bounding_box = pygeoprocessing.transform_bounding_box(
             (lambda p: (p[0], p[2], p[1], p[3]))(aoi_layer.GetExtent()),
             aoi_srs.ExportToWkt(), lat_lng_srs.ExportToWkt())
-        LOGGER.debug(bounding_box)
 
         # clean up the temporary directory when we're done!
         aoi_srs = None
