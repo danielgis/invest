@@ -364,7 +364,7 @@ class DataServer(object):
 
         Returns:
             List of (data_id, datatype) pairs where the data_id can be
-            passed to `fetch_data_tile`
+            passed to `fetch_data_tile`.
         """
         db_connection = sqlite3.connect(self.database_filepath)
         db_cursor = db_connection.cursor()
@@ -402,15 +402,14 @@ class DataServer(object):
         return result_list
 
     def get_data_preview(self):
-        """Build HTML data coverage map..
+        """Build HTML data coverage map.
 
         Parameters:
             none
 
         Returns:
-            A binary string which can be interpreted as a zipfile
-        get data from bounding box"""
-
+            A binary string which can be interpreted as a zipfile.
+        """
         working_dir = tempfile.mkdtemp()
 
         shapefile_path = os.path.join(working_dir, 'coverage_preview.geojson')
