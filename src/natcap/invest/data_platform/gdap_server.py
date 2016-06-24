@@ -306,10 +306,15 @@ class DataServer(object):
 
         Returns:
             a list of data coverage in the form of
-            `(data_id, datatype, proportion_covered)` where
-                `data_id` is a unique identifier used to fetch raw data tiles,
-                `datatype` is one of the strings in
-                    `DataServer._STATIC_DATA_TYPES`.
+            `(data_id, datatype, proportion_covered, lat_lng_bounding_box)`
+                where:
+                    `data_id` is a unique identifier used to fetch raw data
+                        tiles,
+                    `datatype` is one of the strings in
+                        `DataServer._STATIC_DATA_TYPES`,
+                    `lat_lng_bounding_box` is the bounding box that at least
+                        intersects `vector_as_zip_binary` in lat/lng
+                        coordinates as [lng_min, lat_max, lng_max, lat_min]
         """
         # make temporary directory in filepath_directory and unzip the
         # vector there
@@ -388,7 +393,14 @@ class DataServer(object):
             local_bounding_poly = shapely.geometry.Polygon(
                 local_bounding_coords)
             if local_bounding_poly.intersects(bounding_poly):
-                result_list.append((path_hash, data_type))
+                intersection_bounds = (
+                    local_bounding_poly.intersection(bounding_poly).bounds)
+                result_list.append(
+                    (path_hash, data_type, [
+                        intersection_bounds[0],
+                        intersection_bounds[3],
+                        intersection_bounds[2],
+                        intersection_bounds[1]]))
         return result_list
 
     def get_data_preview(self):
