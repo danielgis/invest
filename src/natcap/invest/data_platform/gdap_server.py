@@ -11,6 +11,7 @@ import hashlib
 import shutil
 
 import shapely
+from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
 import Pyro4
@@ -116,13 +117,34 @@ class DataServer(object):
 
         Parameters:
             bounding_box (list): lat/lng of bounding box of the form
-                TODO: DEFINE form
+                [x_min, y_max, x_max, y_min]
             data_id (string): hash to index into the local database file
 
         Returns:
             binary string that can be saved as a zipfile that contains the
             clipped requested data
         """
+        db_connection = sqlite3.connect(self.database_filepath)
+        db_cursor = db_connection.cursor()
+        selection_command = (
+            "SELECT path "
+            "FROM %s " % self._DATA_TABLE_NAME +
+            " WHERE path_hash = '%s';" % data_id)
+        db_cursor.execute(selection_command)
+        raster_path = db_cursor.fetchone()[0]
+        db_connection.close()
+
+        LOGGER.debug("fetched path %s", raster_path)
+        # TODO: convert bounding box from lat/lng to dataset EPSG type
+        lat_lng_srs = osr.SpatialReference()
+        lat_lng_srs.ImportFromEPSG(4632)
+
+        raster = gdal.Open(raster_path)
+        local_bounding_box = pygeoprocessing.transform_bounding_box(
+            bounding_box, lat_lng_srs.ExportToWkt(),
+            raster.GetProjection())
+        raster = None
+
         # Make a bounding box polygon for clipping
         bounding_box_dir = tempfile.mkdtemp()
         bounding_box_path = os.path.join(
@@ -134,7 +156,7 @@ class DataServer(object):
         polygon_layer = vector.CreateLayer(
             'bounding_box', lat_lng_projection, ogr.wkbPolygon)
         ring = ogr.Geometry(ogr.wkbLinearRing)
-        x_min, y_max, x_max, y_min = bounding_box
+        x_min, y_max, x_max, y_min = local_bounding_box
         ring.AddPoint(x_min, y_max)
         ring.AddPoint(x_min, y_min)
         ring.AddPoint(x_max, y_min)
@@ -149,21 +171,12 @@ class DataServer(object):
         ogr.DataSource.__swig_destroy__(vector)
         vector = None
 
-        db_connection = sqlite3.connect(self.database_filepath)
-        db_cursor = db_connection.cursor()
-        selection_command = (
-            "SELECT path "
-            "FROM %s " % self._DATA_TABLE_NAME +
-            " WHERE path_hash = '%s';" % data_id)
-        db_cursor.execute(selection_command)
-        path = db_cursor.fetchone()[0]
-        db_connection.close()
-
         working_dir = tempfile.mkdtemp()
-        out_raster_path = os.path.join(working_dir, os.path.basename(path))
+        out_raster_path = os.path.join(
+            working_dir, os.path.basename(raster_path))
         pygeoprocessing.clip_dataset_uri(
-            path, bounding_box_path, out_raster_path, assert_projections=False,
-            all_touched=True)
+            raster_path, bounding_box_path, out_raster_path,
+            assert_projections=False, all_touched=True)
 
         result = binaryzip_path(working_dir)
         # clean up intermediate result
