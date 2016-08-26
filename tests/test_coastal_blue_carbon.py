@@ -4,15 +4,22 @@ import unittest
 import os
 import shutil
 import csv
+import logging
+import tempfile
+import functools
+import copy
 
 import numpy as np
+import numpy
 from osgeo import gdal
 from pygeoprocessing import geoprocessing as geoprocess
 import pygeoprocessing.testing as pygeotest
 from pygeoprocessing.testing import scm
+import nose.plugins.attrib
 
 SAMPLE_DATA = os.path.join(
     os.path.dirname(__file__), '..', 'data', 'invest-data')
+LOGGER = logging.getLogger(__name__)
 
 
 lulc_lookup_list = \
@@ -94,7 +101,7 @@ def _create_workspace():
     return workspace
 
 
-def _get_args(valuation=True):
+def _get_args(num_transitions=2, valuation=True):
     """Create and return arguements for CBC main model.
 
     Parameters:
@@ -147,14 +154,18 @@ def _get_args(valuation=True):
         datatype=gdal.GDT_Int32,
         filename=os.path.join(workspace, 'raster_2.tif'))
 
+    possible_transitions = [raster_1_uri, raster_2_uri]
+    possible_transition_years = [2000, 2005]
+
     args = {
         'workspace_dir': workspace,
         'results_suffix': 'test',
         'lulc_lookup_uri': lulc_lookup_uri,
         'lulc_transition_matrix_uri': lulc_transition_matrix_uri,
         'lulc_baseline_map_uri': raster_0_uri,
-        'lulc_transition_maps_list': [raster_1_uri, raster_2_uri],
-        'lulc_transition_years_list': [2000, 2005],
+        'lulc_baseline_year': 1995,
+        'lulc_transition_maps_list': possible_transitions[:num_transitions+1],
+        'lulc_transition_years_list': possible_transition_years[:num_transitions+1],
         'analysis_year': 2010,
         'carbon_pool_initial_uri': carbon_pool_initial_uri,
         'carbon_pool_transient_uri': carbon_pool_transient_uri,
@@ -209,6 +220,10 @@ def _get_preprocessor_args(args_choice):
         band_matrices_zeros, srs.origin, srs.projection, NODATA_INT,
         srs.pixel_size(100), datatype=gdal.GDT_Int32,
         filename=os.path.join(workspace, 'raster_3.tif'))
+    raster_4_uri = pygeotest.create_raster_on_disk(
+        band_matrices_zeros, srs.origin, srs.projection, -1,
+        srs.pixel_size(100), datatype=gdal.GDT_Int32,
+        filename=os.path.join(workspace, 'raster_4.tif'))
     raster_nodata_uri = pygeotest.create_raster_on_disk(
         band_matrices_nodata, srs.origin, srs.projection, NODATA_INT,
         srs.pixel_size(100), datatype=gdal.GDT_Int32,
@@ -235,12 +250,21 @@ def _get_preprocessor_args(args_choice):
         'lulc_snapshot_list': [raster_0_uri, raster_nodata_uri, raster_3_uri]
     }
 
+    args4 = {
+        'workspace_dir': workspace,
+        'results_suffix': 'test',
+        'lulc_lookup_uri': lulc_lookup_uri,
+        'lulc_snapshot_list': [raster_0_uri, raster_nodata_uri, raster_4_uri]
+    }
+
     if args_choice == 1:
         return args
     elif args_choice == 2:
         return args2
-    else:
+    elif args_choice == 3:
         return args3
+    else:
+        return args4
 
 
 class TestPreprocessor(unittest.TestCase):
@@ -260,7 +284,7 @@ class TestPreprocessor(unittest.TestCase):
             self.assertTrue(i in transient_dict.keys())
 
     def test_preprocessor_ones(self):
-        """Coastal Blue Carbon: Test entire run of preprocessor.
+        """Coastal Blue Carbon: Test entire run of preprocessor (ones).
 
         All rasters contain ones.
         """
@@ -279,7 +303,7 @@ class TestPreprocessor(unittest.TestCase):
         self.assertTrue(lines[2].startswith('x,,accum'))
 
     def test_preprocessor_zeros(self):
-        """Coastal Blue Carbon: Test entire run of preprocessor.
+        """Coastal Blue Carbon: Test entire run of preprocessor (zeroes).
 
         First two rasters contain ones, last contains zeros.
         """
@@ -299,12 +323,31 @@ class TestPreprocessor(unittest.TestCase):
         self.assertTrue(lines[2][:].startswith('x,disturb,accum'))
 
     def test_preprocessor_nodata(self):
-        """Coastal Blue Carbon: Test entire run of preprocessor.
+        """Coastal Blue Carbon: Test run of preprocessor (various values).
 
         First raster contains ones, second nodata, third zeros.
         """
         from natcap.invest.coastal_blue_carbon import preprocessor
         args = _get_preprocessor_args(3)
+        preprocessor.execute(args)
+        trans_csv = os.path.join(
+            args['workspace_dir'],
+            'outputs_preprocessor',
+            'transitions_test.csv')
+        with open(trans_csv, 'r') as f:
+            lines = f.readlines()
+        # just a regression test.  this tests that an output file was
+        # successfully created, and that two particular land class transitions
+        # occur and are set in the right directions.
+        self.assertTrue(lines[2][:].startswith('x,,'))
+
+    def test_preprocessor_user_defined_nodata(self):
+        """Coastal Blue Carbon: Test preprocessor with user-defined nodata.
+
+        First raster contains ones, second nodata, third zeros.
+        """
+        from natcap.invest.coastal_blue_carbon import preprocessor
+        args = _get_preprocessor_args(4)
         preprocessor.execute(args)
         trans_csv = os.path.join(
             args['workspace_dir'],
@@ -381,7 +424,7 @@ class TestPreprocessor(unittest.TestCase):
         self.assertTrue(lines[1][:].startswith('n,NCC,accum'))
 
     def test_mark_transition_type_nodata_check(self):
-        """Coastal Blue Carbon: Test mark_transition_type."""
+        """Coastal Blue Carbon: Test mark_transition_type with nodata check."""
         from natcap.invest.coastal_blue_carbon import preprocessor
         args = _get_preprocessor_args(1)
 
@@ -397,11 +440,12 @@ class TestPreprocessor(unittest.TestCase):
             filename=os.path.join(
                 args['workspace_dir'], 'raster_1.tif'))
         args['lulc_snapshot_list'][0] = raster_zeros
+
         preprocessor.execute(args)
 
     @scm.skip_if_data_missing(SAMPLE_DATA)
     def test_binary(self):
-        """Coastal Blue Carbon: Test main model run against InVEST-Data."""
+        """Coastal Blue Carbon: Test preprocessor  run against InVEST-Data."""
         from natcap.invest.coastal_blue_carbon import preprocessor
 
         sample_data_path = os.path.join(SAMPLE_DATA, 'CoastalBlueCarbon')
@@ -439,14 +483,15 @@ class TestIO(unittest.TestCase):
         """Coastal Blue Carbon: Test get_inputs function in IO module."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
+
         d = cbc.get_inputs(self.args)
         # check several items in the data dictionary to check that the inputs
         # are properly fetched.
-        self.assertTrue(d['lulc_to_Hb'][0] == 0.0)
-        self.assertTrue(d['lulc_to_Hb'][1] == 1.0)
-        self.assertTrue(len(d['price_t']) == 11)
-        self.assertTrue(len(d['snapshot_years']) == 3)
-        self.assertTrue(len(d['transition_years']) == 2)
+        self.assertEqual(d['lulc_to_Hb'][0], 0.0)
+        self.assertEqual(d['lulc_to_Hb'][1], 1.0)
+        self.assertEqual(len(d['price_t']), 16)
+        self.assertEqual(len(d['snapshot_years']), 4)
+        self.assertEqual(len(d['transition_years']), 2)
 
     def test_get_price_table_exception(self):
         """Coastal Blue Carbon: Test price table exception."""
@@ -477,7 +522,7 @@ class TestIO(unittest.TestCase):
             cbc.get_inputs(self.args)
 
     def test_create_transient_dict(self):
-        """Coastal Blue Carbon: Test function to read transient table."""
+        """Coastal Blue Carbon: Read transient table."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
         biomass_transient_dict, soil_transient_dict = \
@@ -488,7 +533,7 @@ class TestIO(unittest.TestCase):
         self.assertTrue(1 in soil_transient_dict.keys())
 
     def test_get_lulc_trans_to_D_dicts(self):
-        """Coastal Blue Carbon: Test function to read transient table."""
+        """Coastal Blue Carbon: Read transient table (disturbed)."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
         biomass_transient_dict, soil_transient_dict = \
@@ -522,6 +567,11 @@ class TestModel(unittest.TestCase):
         """Coastal Blue Carbon: Test run function in main model."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
+
+        self.args['lulc_baseline_year'] = 2000
+        self.args['lulc_transition_years_list'] = [2005, 2010]
+        self.args['analysis_year'] = None
+
         cbc.execute(self.args)
         netseq_output_raster = os.path.join(
             self.args['workspace_dir'],
@@ -552,10 +602,15 @@ class TestModel(unittest.TestCase):
             npv_array, npv_test, decimal=4)
 
     def test_model_run_2(self):
-        """Coastal Blue Carbon: Test run function in main model."""
+        """Coastal Blue Carbon: Test CBC without analysis year."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
+
         self.args['analysis_year'] = None
+        self.args['lulc_baseline_year'] = 2000
+        self.args['lulc_transition_maps_list'] = [self.args['lulc_transition_maps_list'][0]]
+        self.args['lulc_transition_years_list'] = [2005]
+
         cbc.execute(self.args)
         netseq_output_raster = os.path.join(
             self.args['workspace_dir'],
@@ -584,7 +639,13 @@ class TestModel(unittest.TestCase):
         """Coastal Blue Carbon: Test main model without valuation."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
-        cbc.execute(_get_args(valuation=False))
+
+        self.args = _get_args(valuation=False)
+        self.args['lulc_baseline_year']= 2000
+        self.args['lulc_transition_years_list'] = [2005, 2010]
+        self.args['analysis_year'] = None
+
+        cbc.execute(self.args)
         netseq_output_raster = os.path.join(
             self.args['workspace_dir'],
             'outputs_core/total_net_carbon_sequestration_test.tif')
@@ -607,14 +668,13 @@ class TestModel(unittest.TestCase):
 
     @scm.skip_if_data_missing(SAMPLE_DATA)
     def test_binary(self):
-        """Coastal Blue Carbon: Test main model run against InVEST-Data."""
+        """Coastal Blue Carbon: Test CBC model against InVEST-Data."""
         from natcap.invest.coastal_blue_carbon \
             import coastal_blue_carbon as cbc
 
         sample_data_path = os.path.join(SAMPLE_DATA, 'CoastalBlueCarbon')
         args = {
             'workspace_dir': self.args['workspace_dir'],
-            'analysis_year': 2100,
             'carbon_pool_initial_uri': os.path.join(
                 sample_data_path,
                 'outputs_preprocessor/carbon_pool_initial_sample.csv'),
@@ -631,18 +691,20 @@ class TestModel(unittest.TestCase):
             'lulc_baseline_map_uri': os.path.join(
                 sample_data_path,
                 'inputs/GBJC_2004_mean_Resample.tif'),
+            'lulc_baseline_year': 2004,
             'lulc_transition_maps_list': [
-                os.path.join(sample_data_path,
-                             'inputs/GBJC_2050_mean_Resample.tif'),
+                os.path.join(
+                    sample_data_path,
+                    'inputs/GBJC_2050_mean_Resample.tif'),
                 os.path.join(
                     sample_data_path,
                     'inputs/GBJC_2100_mean_Resample.tif')],
+            'lulc_transition_years_list': [2050, 2100],
             'price_table_uri': os.path.join(
                 sample_data_path, 'inputs/price_table.csv'),
             'lulc_transition_matrix_uri': os.path.join(
                 sample_data_path,
                 'outputs_preprocessor/transitions_sample.csv'),
-            'lulc_transition_years_list': [2004, 2050],
             'price': 10.0,
             'results_suffix': '150225'
         }
@@ -660,14 +722,179 @@ class TestModel(unittest.TestCase):
         u = np.unique(npv_array)
         u.sort()
         a = np.array([-3.935801e+04, -2.052500e+04, -1.788486e+04,
-                      -1.787341e+04, 0.0, 1.145100e+01, 3.724291e+03,
-                      3.743750e+03, 3.770121e+03])
+                      -1.787341e+04, 0.0, 1.145100e+01, 3.2086045e+03,
+                      3.5199617e+03, 3.770121e+03], dtype=numpy.float32)
         a.sort()
         np.testing.assert_array_almost_equal(u, a, decimal=2)
 
     def tearDown(self):
         """Remove workspace."""
         shutil.rmtree(self.args['workspace_dir'])
+
+    def test_1_transition_passes(self):
+        """Coastal Blue Carbon: Test model runs with only 1 transition.
+
+        This is a regression test addressing issue #3572
+        (see: https://bitbucket.org/natcap/invest/issues/3572)
+        """
+        from natcap.invest.coastal_blue_carbon \
+            import coastal_blue_carbon as cbc
+
+        self.args['lulc_transition_maps_list'] = \
+            [self.args['lulc_transition_maps_list'][0]]
+        self.args['lulc_transition_years_list'] = \
+            [self.args['lulc_transition_years_list'][0]]
+        self.args['analysis_year'] = None
+        try:
+            cbc.execute(self.args)
+        except AttributeError as error:
+            LOGGER.exception("Here's the traceback encountered:")
+            self.fail('CBC should not crash when only 1 transition provided')
+
+class CBCRefactorTest(unittest.TestCase):
+    def setUp(self):
+        self.workspace_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.workspace_dir)
+
+    @staticmethod
+    def create_args(workspace, transition_tuples=None, analysis_year=None):
+        """Create a default args dict with the given transition matrices.
+
+        Arguments:
+            workspace (string): The path to the workspace directory on disk.
+                Files will be saved to this location.
+            transition_tuples (list or None): A list of tuples, where the first
+                element of the tuple is a numpy matrix of the transition values,
+                and the second element of the tuple is the year of the transition.
+                Provided years must be in chronological order.
+                If ``None``, the transition parameters will be ignored.
+            analysis_year (int or None): The year of the final analysis.  If
+                provided, it must be greater than the last year within the
+                transition tuples (unless ``transition_tuples`` is None, in which
+                case ``analysis_year`` can be anything greater than 2000, the
+                baseline year).
+
+        Returns:
+            A dict of the model arguments.
+        """
+        from pygeoprocessing.testing import sampledata
+
+        args = {
+            'workspace_dir': workspace,
+            'lulc_lookup_uri': os.path.join(workspace, 'lulc_lookup.csv'),
+            'lulc_transition_matrix_uri': os.path.join(workspace,
+                                                       'transition_matrix.csv'),
+            'carbon_pool_initial_uri': os.path.join(workspace,
+                                                    'carbon_pool_initial.csv'),
+            'carbon_pool_transient_uri': os.path.join(workspace,
+                                                      'carbon_pool_transient.csv'),
+            'lulc_baseline_map_uri': os.path.join(workspace, 'lulc.tif'),
+            'lulc_baseline_year': 2000,
+            'do_economic_analysis': False,
+        }
+        _create_table(args['lulc_lookup_uri'], lulc_lookup_list)
+        _create_table(
+            args['lulc_transition_matrix_uri'],
+            lulc_transition_matrix_list)
+        _create_table(
+            args['carbon_pool_initial_uri'],
+            carbon_pool_initial_list)
+        _create_table(
+            args['carbon_pool_transient_uri'],
+            carbon_pool_transient_list)
+
+        # Only parameters needed are band_matrices and filename
+        make_raster = functools.partial(
+            sampledata.create_raster_on_disk,
+            origin=sampledata.SRS_WILLAMETTE.origin,
+            projection_wkt=sampledata.SRS_WILLAMETTE.projection,
+            nodata=-1, pixel_size=sampledata.SRS_WILLAMETTE.pixel_size(100))
+
+        known_matrix_size = None
+        if transition_tuples:
+            args['lulc_transition_maps_list'] = []
+            args['lulc_transition_years_list'] = []
+
+            for band_matrix, transition_year in transition_tuples:
+                known_matrix_size = band_matrix.shape
+                filename = os.path.join(workspace,
+                                        'transition_%s.tif' % transition_year)
+                make_raster(band_matrices=[band_matrix], filename=filename)
+
+                args['lulc_transition_maps_list'].append(filename)
+                args['lulc_transition_years_list'].append(transition_year)
+
+        # Make the lulc
+        lulc_shape = (10, 10) if not known_matrix_size else known_matrix_size
+        make_raster(band_matrices=[numpy.ones(lulc_shape)],
+                    filename=args['lulc_baseline_map_uri'])
+
+        if analysis_year:
+            args['analysis_year'] = analysis_year
+
+        # TODO: allow for testing of valuation
+        return args
+
+    def test_no_transitions(self):
+        """Coastal Blue Carbon: Verify model can run without transitions."""
+        from natcap.invest.coastal_blue_carbon \
+            import coastal_blue_carbon as cbc
+
+        args = CBCRefactorTest.create_args(
+            workspace=self.workspace_dir, transition_tuples=None,
+            analysis_year=None)
+
+        cbc.execute(args)
+
+    def test_one_transition(self):
+        """Coastal Blue Carbon: Verify model can run with 1 transition."""
+        from natcap.invest.coastal_blue_carbon \
+            import coastal_blue_carbon as cbc
+
+        transition_tuples = [
+            (numpy.ones((10, 10)), 2010),
+        ]
+
+        args = CBCRefactorTest.create_args(
+            workspace=self.workspace_dir,
+            transition_tuples=transition_tuples,
+            analysis_year=None)
+
+        cbc.execute(args)
+
+    def test_transient_dict_extraction(self):
+        """Coastal Blue Carbon: Verify extraction of transient dictionary."""
+        from natcap.invest.coastal_blue_carbon \
+            import coastal_blue_carbon as cbc
+
+        transient_file = _create_table(
+            os.path.join(self.workspace_dir, 'transient.csv'),
+            carbon_pool_transient_list[:3])
+
+        biomass_dict, soil_dict = cbc._create_transient_dict(transient_file)
+
+        expected_biomass_dict = {
+            0: {
+                'lulc-class': 'n',
+                'half-life': 0.0,
+                'med-impact-disturb': 0.0,
+                'yearly-accumulation': 0.0,
+            },
+            1: {
+                'lulc-class': 'x',
+                'half-life': 1,
+                'med-impact-disturb': 0.5,
+                'yearly-accumulation': 1,
+            }
+        }
+
+        expected_soil_dict = copy.deepcopy(expected_biomass_dict)
+        expected_soil_dict[1]['yearly-accumulation'] = 1.1
+
+        self.assertEqual(biomass_dict, expected_biomass_dict)
+        self.assertEqual(soil_dict, expected_soil_dict)
 
 
 if __name__ == '__main__':
