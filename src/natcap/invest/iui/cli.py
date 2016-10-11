@@ -10,19 +10,9 @@ import json
 
 import pkg_resources
 import natcap.versioner
-import natcap.invest
-import natcap.invest.iui.modelui
 
-TOOLS_IN_DEVELOPMENT = set([
-    'seasonal_water_yield',
-    'ndr',
-    'globio',
-    'seasonal_water_yield',
-    'scenic_quality',
-    'crop_production',
-    'scenic_quality',
-    'habitat_suitability',
-])
+
+_CLI_CONFIG_FILENAME = 'cli_config'
 
 
 def iui_dir():
@@ -51,7 +41,7 @@ def load_config():
     """
 
     try:
-        config_file = os.path.join(iui_dir(), 'cli_config.json')
+        config_file = os.path.join(iui_dir(), _CLI_CONFIG_FILENAME + '.json')
         user_config = json.load(open(config_file))
     except IOError:
         # Raised when the cli config file hasn't been defined or can't be
@@ -71,12 +61,18 @@ def load_config():
 def list_models():
     """
     List all models that have .json files defined in the iui dir.
+
+    Returns:
+        A sorted list of model names.
     """
     model_names = []
     json_files = os.path.join(iui_dir(), '*.json')
     for json_file in glob.glob(json_files):
         json_name, _ = os.path.splitext(json_file)
         json_name = os.path.basename(json_name)
+
+        if json_name == _CLI_CONFIG_FILENAME:
+            continue
 
         model_names.append(json_name)
     return sorted(model_names)
@@ -89,11 +85,7 @@ def print_models():
     print "Checking what's available in %s" % iui_dir()
     print 'Available models:'
     for model_name in list_models():
-        if model_name in TOOLS_IN_DEVELOPMENT:
-            unstable = '    UNSTABLE'
-        else:
-            unstable = ''
-        print '    %-30s %s' % (model_name, unstable)
+        print '    %-30s' % model_name
 
 
 def write_console_files(out_dir, extension):
@@ -143,10 +135,13 @@ def main():
         'open-source python environment.'),
         prog='invest'
     )
+    import natcap.invest
     parser.add_argument('--version', action='version',
                         version=natcap.invest.__version__)
     parser.add_argument('--list', action='store_true',
                         help='List available models')
+    parser.add_argument('--test', action='store_false',
+                         help='Run in headless mode with default args.')
     parser.add_argument('model', nargs='?', help=(
         'The model/tool to run. Use --list to show available models/tools. '
         'Identifiable model prefixes may also be used.'))
@@ -158,8 +153,8 @@ def main():
         print_models()
         return 0
 
-    # args.model is '' when the user provided no input.
-    if args.model == '':
+    # args.model is '' or None when the user provided no input.
+    if args.model in ['', None]:
         parser.print_help()
         print ''
         print_models()
@@ -192,7 +187,8 @@ def main():
             print '    %s' % ' '.join(matching_models)
             return 2
 
-        natcap.invest.iui.modelui.main(modelname + '.json')
+        import natcap.invest.iui.modelui
+        natcap.invest.iui.modelui.main(modelname + '.json', args.test)
 
 if __name__ == '__main__':
     main()

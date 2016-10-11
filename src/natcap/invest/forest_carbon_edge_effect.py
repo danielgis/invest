@@ -1,20 +1,20 @@
-"""InVEST Carbon Edge Effect Model an implementation of the model described in
-'Degradation in carbon stocks near tropical forest edges', by Chaplin-Kramer
-et. al (in review)"""
+"""InVEST Carbon Edge Effect Model.
+
+An implementation of the model described in 'Degradation in carbon stocks
+near tropical forest edges', by Chaplin-Kramer et. al (in review).
+"""
 
 import os
 import logging
 import time
 import uuid
 
+from . import utils
 import numpy
 from osgeo import gdal
 from osgeo import ogr
 import pygeoprocessing
 import scipy.spatial
-
-logging.basicConfig(format='%(asctime)s %(name)-18s %(levelname)-8s \
-    %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 
 LOGGER = logging.getLogger('natcap.invest.carbon_edge_effect')
 
@@ -26,7 +26,9 @@ CARBON_MAP_NODATA = -9999
 
 
 def execute(args):
-    """InVEST Carbon Edge Model calculates the carbon due to edge effects in
+    """Forest Carbon Edge Effect.
+
+    InVEST Carbon Edge Model calculates the carbon due to edge effects in
     tropical forest pixels.
 
     Parameters:
@@ -40,39 +42,42 @@ def execute(args):
             shapefile that will be used to aggregate carbon stock results at
             the end of the run.
         args['biophysical_table_uri'] (string): a path to a CSV table that has
-            at least a header for an 'lucode' and 'c_above'. If
-            args['compute_forest_edge_effects'] is True, table must also
-            contain an 'is_tropical_forest' header.  If
-            args['pools_to_calculate'] if 'all' must contain headers 'c_below',
-            'c_dead', and 'c_soil'.
-                'lucode': an integer that corresponds to landcover codes in
-                    the raster args['lulc_uri']
-                'is_tropical_forest': either 0 or 1 indicating whether the
-                    landcover type is forest (1) or not (0).  If 1, the value
-                    in 'c_above' is ignored and instead calculated from the
-                    edge regression model.
-                'c_above': floating point number indicating tons of above
-                    ground carbon per hectare for that landcover type
-                {'c_below', 'c_dead', 'c_soil'}: three other optional carbon
-                    pools that will statically map landcover types to the
-                    carbon densities in the table.
+            at least the fields 'lucode' and 'c_above'. If
+            ``args['compute_forest_edge_effects'] == True``, table must
+            also contain an 'is_tropical_forest' field.  If
+            ``args['pools_to_calculate'] == 'all'``, this table must contain
+            the fields 'c_below', 'c_dead', and 'c_soil'.
 
-                Example:
+                * ``lucode``: an integer that corresponds to landcover codes in
+                  the raster ``args['lulc_uri']``
+                * ``is_tropical_forest``: either 0 or 1 indicating whether the
+                  landcover type is forest (1) or not (0).  If 1, the value
+                  in ``c_above`` is ignored and instead calculated from the
+                  edge regression model.
+                * ``c_above``: floating point number indicating tons of above
+                  ground carbon per hectare for that landcover type
+                * ``{'c_below', 'c_dead', 'c_soil'}``: three other optional
+                  carbon pools that will statically map landcover types to the
+                  carbon densities in the table.
+
+                Example::
+
                     lucode,is_tropical_forest,c_above,c_soil,c_dead,c_below
                     0,0,32.8,5,5.2,2.1
                     1,1,n/a,2.5,0.0,0.0
                     2,1,n/a,1.8,1.0,0.0
                     16,0,28.1,4.3,0.0,2.0
 
-                    Note the "n/a" in 'c_above' are optional since that field
-                    is ignored when is_tropical_forest==1.
-
+                Note the "n/a" in ``c_above`` are optional since that field
+                is ignored when ``is_tropical_forest==1``.
         args['lulc_uri'] (string): path to a integer landcover code raster
-        args['pools_to_calculate'] (string): one of "all" or "above_ground".
-            If "all" model expects 'c_above', 'c_below', 'c_dead', 'c_soil'
-            in header of biophysical_table and will make a translated carbon
-            map for each based off the landcover map.  If "above_ground", this
-            is only done with 'c_above'.
+        args['pools_to_calculate'] (string): if "all" then all carbon pools
+            will be calculted.  If any other value only above ground carbon
+            pools will be calculated and expect only a 'c_above' header in
+            the biophysical table. If "all" model expects 'c_above',
+            'c_below', 'c_dead', 'c_soil' in header of biophysical_table and
+            will make a translated carbon map for each based off the landcover
+            map.
         args['compute_forest_edge_effects'] (boolean): if True, requires
             biophysical table to have 'is_tropical_forest' forest field, and
             any landcover codes that have a 1 in this column calculate carbon
@@ -85,12 +90,17 @@ def execute(args):
             that have different meanings depending on the 'method' parameter.
             Specifically,
 
-                method 1 asymptotic model:
+                * method 1 (asymptotic model)::
+
                     biomass = theta1 - theta2 * exp(-theta3 * edge_dist_km)
-                method 2 logarithmic model:
+
+                * method 2 (logarithmic model)::
+
+                    # NOTE: theta3 is ignored for this method
                     biomass = theta1 + theta2 * numpy.log(edge_dist_km)
-                     (theta3 is ignored for this method)
-                method 3 linear regression:
+
+                * method 3 (linear regression)::
+
                     biomass = theta1 + theta2 * edge_dist_km
 
         args['biomass_to_carbon_conversion_factor'] (string/float): Number by
@@ -98,18 +108,13 @@ def execute(args):
             effect calculation.
 
     Returns:
-        None"""
-
+        None
+    """
     output_dir = args['workspace_dir']
     intermediate_dir = os.path.join(
         args['workspace_dir'], 'intermediate_outputs')
     pygeoprocessing.create_directories([output_dir, intermediate_dir])
-    try:
-        file_suffix = args['results_suffix']
-        if file_suffix != "" and not file_suffix.startswith('_'):
-            file_suffix = '_' + file_suffix
-    except KeyError:
-        file_suffix = ''
+    file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
     # used to keep track of files generated by this module
     output_file_registry = {
@@ -128,10 +133,6 @@ def execute(args):
             intermediate_dir, 'c_soil_carbon_stocks%s.tif' % file_suffix)
         output_file_registry['c_dead_map'] = os.path.join(
             intermediate_dir, 'c_dead_carbon_stocks%s.tif' % file_suffix)
-    elif args['pools_to_calculate'] != 'above_ground':
-        raise ValueError(
-            "Unknown value for args['pools_to_calculate']=%s" %
-            args['pools_to_calculate'])
 
     if args['compute_forest_edge_effects']:
         output_file_registry['edge_distance'] = os.path.join(
@@ -211,7 +212,7 @@ def execute(args):
         'intersection', vectorize_op=False, datasets_are_pre_aligned=True)
 
     # generate report (optional) by aoi if they exist
-    if 'aoi_uri' in args:
+    if 'aoi_uri' in args and args['aoi_uri'] != '':
         LOGGER.info('aggregating carbon map by aoi')
         _aggregate_carbon_map(
             args['aoi_uri'], output_file_registry['carbon_map'],
@@ -236,16 +237,10 @@ def _aggregate_carbon_map(
             will be created by this function as the aggregating output.
 
     Returns:
-        None"""
-
+        None
+    """
     esri_driver = ogr.GetDriverByName('ESRI Shapefile')
     original_serviceshed_datasource = ogr.Open(aoi_uri)
-    if (os.path.normpath(aoi_uri) ==
-            os.path.normpath(aoi_datasource_filename)):
-        raise ValueError(
-            "The input and output serviceshed filenames are the same, "
-            "please choose a different workspace or move the serviceshed "
-            "out of the current workspace %s" % aoi_datasource_filename)
 
     if os.path.exists(aoi_datasource_filename):
         os.remove(aoi_datasource_filename)
@@ -279,7 +274,10 @@ def _aggregate_carbon_map(
         serviceshed_defn.GetFieldIndex(poly_id_field))
 
     carbon_sum_field = ogr.FieldDefn('c_sum', ogr.OFTReal)
+    carbon_sum_field.SetWidth(24)
     carbon_mean_field = ogr.FieldDefn('c_ha_mean', ogr.OFTReal)
+    carbon_mean_field.SetWidth(24)
+
     serviceshed_layer.CreateField(carbon_sum_field)
     serviceshed_layer.CreateField(carbon_mean_field)
 
@@ -343,7 +341,7 @@ def _calculate_lulc_carbon_map(
                     biophysical_table[lucode][carbon_pool_type]) * cell_area_ha
             except ValueError:
                 raise ValueError(
-                    "Could not interpret carbon pool type as a number. "
+                    "Could not interpret carbon pool value as a number. "
                     "lucode: %s, pool_type: %s, value: %s" %
                     (lucode, carbon_pool_type,
                      biophysical_table[lucode][carbon_pool_type]))
@@ -408,7 +406,7 @@ def _map_distance_from_tropical_forest_edge(
 def _build_spatial_index(
         base_raster_uri, local_model_dir,
         tropical_forest_edge_carbon_model_shapefile_uri):
-    """Builds a kd-tree index of the locally projected globally georeferenced
+    """Build a kd-tree index of the locally projected globally georeferenced
     carbon edge model parameters.
 
     Parameters:
@@ -464,12 +462,9 @@ def _build_spatial_index(
     theta_model_parameters = numpy.array(
         theta_model_parameters, dtype=numpy.float32)
 
-    # if kd-tree is empty, raise exception
-    if len(kd_points) == 0:
-        raise ValueError("The input raster is outside any carbon edge model")
     LOGGER.info('building kd_tree')
     kd_tree = scipy.spatial.cKDTree(kd_points)
-    LOGGER.info('done building kd_tree')
+    LOGGER.info('done building kd_tree with %d points', len(kd_points))
     return kd_tree, theta_model_parameters, method_model_parameter
 
 
@@ -523,11 +518,13 @@ def _calculate_tropical_forest_edge_carbon_map(
 
     cell_area_ha = pygeoprocessing.geoprocessing.get_cell_size_from_uri(
         edge_distance_uri) ** 2 / 10000.0
+    cell_size_km = pygeoprocessing.geoprocessing.get_cell_size_from_uri(
+        edge_distance_uri) / 1000.0
 
     # Loop memory block by memory block, calculating the forest edge carbon
     # for every forest pixel.
     for edge_distance_data, edge_distance_block in pygeoprocessing.iterblocks(
-            edge_distance_uri):
+            edge_distance_uri, largest_block=2**12):
         current_time = time.time()
         if current_time - last_time > 5.0:
             LOGGER.info(
@@ -565,17 +562,14 @@ def _calculate_tropical_forest_edge_carbon_map(
         coord_points = zip(
             row_coords[valid_edge_distance_mask].ravel(),
             col_coords[valid_edge_distance_mask].ravel())
-        try:
-            distances, indexes = kd_tree.query(
-                coord_points, k=n_nearest_model_points,
-                distance_upper_bound=DISTANCE_UPPER_BOUND, n_jobs=-1)
-        except TypeError:
-            LOGGER.warn(
-                "n_jobs parameter not supported, reverting to single "
-                "threaded query")
-            distances, indexes = kd_tree.query(
-                coord_points, k=n_nearest_model_points,
-                distance_upper_bound=DISTANCE_UPPER_BOUND)
+        # note, the 'n_jobs' parameter was introduced in SciPy 0.16.0
+        distances, indexes = kd_tree.query(
+            coord_points, k=n_nearest_model_points,
+            distance_upper_bound=DISTANCE_UPPER_BOUND, n_jobs=-1)
+
+        if n_nearest_model_points == 1:
+            distances = distances.reshape(distances.shape[0], 1)
+            indexes = indexes.reshape(indexes.shape[0], 1)
 
         # the 3 is for the 3 thetas in the carbon model
         thetas = numpy.zeros((indexes.shape[0], indexes.shape[1], 3))
@@ -587,27 +581,27 @@ def _calculate_tropical_forest_edge_carbon_map(
         biomass_model = numpy.zeros(
             (indexes.shape[0], indexes.shape[1], 3))
         # reshape to an N,nearest_points so we can multiply by thetas
-        valid_edge_distances = numpy.repeat(
-            edge_distance_block[valid_edge_distance_mask],
+        valid_edge_distances_km = numpy.repeat(
+            edge_distance_block[valid_edge_distance_mask] * cell_size_km,
             n_nearest_model_points).reshape(-1, n_nearest_model_points)
 
         # asymptotic model
         # biomass_1 = t1 - t2 * exp(-t3 * edge_dist_km)
         biomass_model[:, :, 0] = (
             thetas[:, :, 0] - thetas[:, :, 1] * numpy.exp(
-                -thetas[:, :, 2] * valid_edge_distances)
+                -thetas[:, :, 2] * valid_edge_distances_km)
             ) * cell_area_ha
 
         # logarithmic model
         # biomass_2 = t1 + t2 * numpy.log(edge_dist_km)
         biomass_model[:, :, 1] = (
             thetas[:, :, 0] + thetas[:, :, 1] * numpy.log(
-                valid_edge_distances)) * cell_area_ha
+                valid_edge_distances_km)) * cell_area_ha
 
         # linear regression
         # biomass_3 = t1 + t2 * edge_dist_km
         biomass_model[:, :, 2] = (
-            (thetas[:, :, 0] + thetas[:, :, 1] * valid_edge_distances) *
+            (thetas[:, :, 0] + thetas[:, :, 1] * valid_edge_distances_km) *
             cell_area_ha)
 
         # Collapse the biomass down to the valid models

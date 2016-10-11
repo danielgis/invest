@@ -7,6 +7,8 @@ import os
 import collections
 import math
 import datetime
+import matplotlib
+matplotlib.use('AGG')  # Use the Anti-Grain Geometry backend (for PNG files)
 from matplotlib import pyplot as plt
 import re
 import random
@@ -310,7 +312,7 @@ def make_risk_plots(out_dir, aoi_pairs, max_risk, max_stress, num_stress, num_ha
         fig.text(0.06, 0.5, 'Consequence', ha='center', va='center',
                  rotation='vertical')
 
-        hab_index = 0
+        hab_index = 1
         curr_hab_name = aoi_list[0][0]
 
         # Elements look like: (HabName, StressName, E, C, Risk)
@@ -320,7 +322,7 @@ def make_risk_plots(out_dir, aoi_pairs, max_risk, max_stress, num_stress, num_ha
                 # Want to have two across, and make sure there are enough
                 # spaces going down for each of the subplots
                 plt.subplot(int(math.ceil(num_habs / 2.0)),
-                                          2, hab_index)
+                            2, hab_index)
                 plot_background_circle(max_risk)
                 plt.title(curr_hab_name)
                 plt.xlim([-.5, max_risk])
@@ -1785,15 +1787,16 @@ def make_risk_euc(base_uri, e_uri, c_uri, risk_uri):
         b_mask = b_pix != -1
         c_mask = c_pix != -1
 
-        # Want to make sure that the decay is applied to E first, then that
-        # product is what is used as the new E
-        e_vals = (b_pix * e_pix) - 1
+        e_vals = e_pix - 1
         c_vals = c_pix - 1
 
         e_vals = e_vals ** 2
         c_vals = c_vals ** 2
 
-        risk_map = numpy.sqrt(e_vals + c_vals)
+        # Per email from kwyatt and karkema, the h/(bufferedstressor) overlap
+        # layer should be applied after the sqrt is taken, not multiplied by E
+        # before the sqrt.  See https://bitbucket.org/natcap/invest/issues/3564
+        risk_map = numpy.sqrt(e_vals + c_vals) * b_pix
 
         risk_map = numpy.where(c_mask, risk_map, -1)
         risk_map = numpy.where(c_mask & ~b_mask, 0, risk_map)

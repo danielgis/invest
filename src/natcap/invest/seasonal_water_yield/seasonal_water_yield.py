@@ -75,7 +75,7 @@ _TMP_BASE_FILES = {
 
 
 def execute(args):
-    """InVEST seasonal water yield model.
+    """Seasonal Water Yield.
 
     This function invokes the InVEST seasonal water yield model described in
     "Spatial attribution of baseflow generation at the parcel level for
@@ -104,11 +104,13 @@ def execute(args):
         args['soil_group_path'] (string): required if
             args['user_defined_local_recharge'] is  False. A path to a raster
             indicating SCS soil groups where integer values are mapped to soil
-            types:
+            types::
+
                 1: A
                 2: B
                 3: C
                 4: D
+
         args['aoi_path'] (string): path to a vector that indicates the area
             over which the model should be run, as well as the area in which to
             aggregate over when calculating the output Qb.
@@ -148,6 +150,9 @@ def execute(args):
         args['monthly_alpha'] (boolean): if True, use the alpha
         args['monthly_alpha_path'] (string): required if args['monthly_alpha']
             is True.
+
+    Returns:
+        ``None``
     """
     # This upgrades warnings to exceptions across this model.
     # I found this useful to catch all kinds of weird inputs to the model
@@ -582,8 +587,8 @@ def _calculate_monthly_quick_flow(
         """
         valid_mask = (
             (p_im != p_nodata) & (s_i != si_nodata) & (p_im != 0.0) &
-            (stream_array != 1) & (n_events != n_events_nodata) &
-            (n_events > 0))
+            (s_i != 0.0) & (stream_array != 1) &
+            (n_events != n_events_nodata) & (n_events > 0))
         valid_n_events = n_events[valid_mask]
         valid_si = s_i[valid_mask]
 
@@ -664,13 +669,15 @@ def _calculate_curve_number_raster(
                     biophysical_table[lucode][soil_column])
                 lulc_to_soil[soil_id]['lulc_values'].append(lucode)
             else:
-                #handle the lulc nodata with cn nodata
+                # handle the lulc nodata with cn nodata
                 lulc_to_soil[soil_id]['lulc_values'].append(lulc_nodata)
                 lulc_to_soil[soil_id]['cn_values'].append(cn_nodata)
 
+        # Making the landcover array a float32 in case the user provides a
+        # float landcover map like Kate did.
         lulc_to_soil[soil_id]['lulc_values'] = (
             numpy.array(lulc_to_soil[soil_id]['lulc_values'],
-                        dtype=numpy.int32))
+                        dtype=numpy.float32))
         lulc_to_soil[soil_id]['cn_values'] = (
             numpy.array(lulc_to_soil[soil_id]['cn_values'],
                         dtype=numpy.float32))
@@ -800,8 +807,16 @@ def _aggregate_recharge(
         aggregate_layer.ResetReading()
         for poly_index, poly_feat in enumerate(aggregate_layer):
             if op_type == 'mean':
-                value = (aggregate_stats.total[poly_index] /
-                         aggregate_stats.n_pixels[poly_index])
+                n_pixels = aggregate_stats.n_pixels[poly_index]
+                if n_pixels != 0:
+                    value = (aggregate_stats.total[poly_index] /
+                             aggregate_stats.n_pixels[poly_index])
+                else:
+                    LOGGER.warn(
+                        "no coverage for polygon %s", ', '.join(
+                            [str(poly_feat.GetField(_)) for _ in xrange(
+                                poly_feat.GetFieldCount())]))
+                    value = 0.0
             elif op_type == 'sum':
                 value = aggregate_stats.total[poly_index]
             poly_feat.SetField(aggregate_field_id, value)

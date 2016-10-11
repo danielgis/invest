@@ -7,6 +7,8 @@ import time
 import logging
 import math
 import urllib
+import tempfile
+import shutil
 
 import Pyro4
 from osgeo import ogr
@@ -65,7 +67,9 @@ _TMP_BASE_FILES = {
 
 
 def execute(args):
-    """Execute recreation client model on remote server.
+    """Recreation.
+
+    Execute recreation client model on remote server.
 
     Parameters:
         args['workspace_dir'] (string): path to workspace directory
@@ -94,25 +98,28 @@ def execute(args):
             args['compute_regression'] is True.  Path to a table that
             describes the regression predictors, their IDs and types.  Must
             contain the fields 'id', 'path', and 'type' where:
-                'id': is a <=10 character length ID that is used to uniquely
-                    describe the predictor.  It will be added to the output
-                    result shapefile attribute table which is an ESRI
-                    Shapefile, thus limited to 10 characters.
-                'path': an absolute or relative (to this table) path to the
-                    predictor dataset, either a vector or raster type.
-                'type': one of the following,
-                    'raster_mean': mean of values in the raster under the
-                        response polygon
-                    'raster_sum': sum of values in the raster under the
-                        response polygon
-                    'point_count': count of the points contained in the
-                        response polygon
-                    'point_nearest_distance': distance to the nearest point
-                        from the response polygon
-                    'line_intersect_length': length of lines that intersect
-                        with the response polygon in projected units of AOI
-                    'polygon_area': area of the polygon contained within
-                        response polygon in projected units of AOI
+
+                * 'id': is a <=10 character length ID that is used to uniquely
+                  describe the predictor.  It will be added to the output
+                  result shapefile attribute table which is an ESRI
+                  Shapefile, thus limited to 10 characters.
+                * 'path': an absolute or relative (to this table) path to the
+                  predictor dataset, either a vector or raster type.
+                * 'type': one of the following,
+
+                    * 'raster_mean': mean of values in the raster under the
+                      response polygon
+                    * 'raster_sum': sum of values in the raster under the
+                      response polygon
+                    * 'point_count': count of the points contained in the
+                      response polygon
+                    * 'point_nearest_distance': distance to the nearest point
+                      from the response polygon
+                    * 'line_intersect_length': length of lines that intersect
+                      with the response polygon in projected units of AOI
+                    * 'polygon_area': area of the polygon contained within
+                      response polygon in projected units of AOI
+
         args['scenario_predictor_table_path'] (string): (optional) if
             present runs the scenario mode of the recreation model with the
             datasets described in the table on this path.  Field headers
@@ -223,8 +230,18 @@ def execute(args):
     # unpack result
     open(file_registry['compressed_pud_path'], 'wb').write(
         result_zip_file_binary)
+    temporary_output_dir = tempfile.mkdtemp()
     zipfile.ZipFile(file_registry['compressed_pud_path'], 'r').extractall(
-        output_dir)
+        temporary_output_dir)
+    monthly_table_path = os.path.join(
+        temporary_output_dir, 'monthly_table.csv')
+    if os.path.exists(monthly_table_path):
+        os.rename(
+            monthly_table_path,
+            os.path.splitext(monthly_table_path)[0] + file_suffix + '.csv')
+    for filename in os.listdir(temporary_output_dir):
+        shutil.copy(os.path.join(temporary_output_dir, filename), output_dir)
+    shutil.rmtree(temporary_output_dir)
 
     if 'compute_regression' in args and args['compute_regression']:
         LOGGER.info('Calculating regression')

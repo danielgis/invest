@@ -1,7 +1,7 @@
 {
   "id": "window",
   "label": "Habitat Quality",
-  "targetScript": "natcap.invest.habitat_quality.habitat_quality",
+  "targetScript": "natcap.invest.habitat_quality",
   "modelName": "habitat_quality",
   "localDocURI": "../documentation/habitat_quality.html",
   "height": 500,
@@ -41,7 +41,7 @@
           "args_id": "landuse_cur_uri",
           "type": "file",
           "label": "Current Land Cover (Raster)",
-          "defaultValue": "../HabitatQuality/lc_samp_cur_b/w001001.adf",
+          "defaultValue": "../HabitatQuality/lc_samp_cur_b.tif",
           "required": true,
           "validateAs": {
             "type": "GDAL"
