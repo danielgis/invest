@@ -2785,7 +2785,7 @@ def _build_nsis(version, bindir, arch):
     else:
         short_version = version
 
-    hg_path = sh('hg paths', capture=True).rstrip()
+    hg_path = sh('hg showconfig paths.default', capture=True).rstrip()
     forkuser, forkreponame = hg_path.split('/')[-2:]
     if forkuser == 'natcap':
         data_location = 'invest-data/%s' % short_version
@@ -3296,7 +3296,7 @@ def forked_by(options):
     Print the name of the user who forked this repo.
     """
 
-    hg_path = sh('hg paths', capture=True).rstrip()
+    hg_path = sh('hg showconfig paths.default', capture=True).rstrip()
 
     username, reponame = hg_path.split('/')[-2:]
     print 'username=%s' % username
@@ -3562,7 +3562,7 @@ def jenkins_push_artifacts(options):
     try:
         hg_path = getattr(options.jenkins_push_artifacts, 'upstream')
     except AttributeError:
-        hg_path = sh('hg paths', capture=True).rstrip()
+        hg_path = sh('hg showconfig paths.default', capture=True).rstrip()
 
     username, reponame = hg_path.split('/')[-2:]
 
