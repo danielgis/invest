@@ -1,11 +1,16 @@
 """InVEST specific code utils."""
 import math
 import os
+import logging
+from types import StringType
+import csv
 
 import numpy
 from osgeo import gdal
 from osgeo import osr
 import pygeoprocessing
+
+LOGGER = logging.getLogger('natcap.invest.utils')
 
 
 def make_suffix_string(args, suffix_key):
@@ -190,3 +195,86 @@ def build_file_registry(base_file_path_list, file_suffix):
                 duplicate_keys, duplicate_paths))
 
     return f_reg
+
+
+def get_lookup_from_csv(csv_table_path, key_field):
+    """Read CSV table file in as dictionary.
+
+    Creates a dictionary to index rows in a csv table indexed by the given
+    key_field.
+
+    Parameters:
+        csv_table_path (string): a filepath to a csv file containing at
+            least the header `key_field`
+        key_field: (string) a string that corresponds to one of the table
+            column headers in the CSV at `csv_table_path`.
+
+    Returns:
+        lookup_dict (dict): returns a dictionary of the form {key_field_0:
+            {header_1: val_1_0, header_2: val_2_0, etc.} where values are
+            dictionaries representing rows of the csv indexed by their table
+            headers.
+    """
+    def _smart_unicode_cast(string):
+        if isinstance(string, StringType):
+            return unicode(string, 'utf-8')
+        return string
+
+    with open(csv_table_path, 'rU') as csv_file:
+        # attempt to detect excel style csvs like the example here
+        # https://docs.python.org/2/library/csv.html#csv.Sniffer
+        # the 1024 is a large chunk of the file, presumably enough to
+        # either figure out the dialect or go home.
+        # Sniffer expects whole lines, so we need to take extra care to return
+        # a string that consists of whole lines.
+        dialect = csv.Sniffer().sniff(
+            '\n'.join(csv_file.readlines(1024)), delimiters=";,")
+        csv_file.seek(0)
+        csv_reader = csv.reader(csv_file, dialect=dialect)
+        header_row = [_smart_unicode_cast(s) for s in csv_reader]
+        key_index = header_row.index(key_field)
+        # This makes a dictionary that maps the headers to the indexes they
+        # represent in the soon to be read lines
+        index_to_field = dict(zip(range(len(header_row)), header_row))
+
+        lookup_dict = {}
+        for line_num, line in enumerate(csv_reader):
+            try:
+                key_value = _smart_cast(line[key_index])
+            except IndexError as error:
+                LOGGER.error('CSV line %s (%s) should have index %s',
+                             line_num, line, key_index)
+                raise error
+            # Map an entire row to its lookup values
+            lookup_dict[key_value] = (
+                dict([(index_to_field[index], _smart_cast(value))
+                      for index, value in enumerate(line)]))
+        return lookup_dict
+
+
+def _smart_cast(value):
+    """Attempt cast to a float, int, else leave as string.
+
+    Parameter:
+        value (string): a value that might represent a string, int, or float.
+
+    Returns:
+        value cast to an int, or float if possible, otherwise the original
+            value as a string
+    """
+    # If it's not a string, don't try to cast it because i got a bug
+    # where all my floats were happily cast to ints
+    if not isinstance(value, StringType):
+        return value
+    for cast_function in [int, float]:
+        try:
+            return cast_function(value)
+        except ValueError:
+            pass
+    for unicode_type in ['ascii', 'utf-8', 'latin-1']:
+        try:
+            return value.decode(unicode_type)
+        except UnicodeDecodeError:
+            pass
+    LOGGER.warn("unknown encoding type encountered in _smart_cast: %s", value)
+    return value
