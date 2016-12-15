@@ -21,6 +21,7 @@ _INTERMEDIATE_BASE_FILES = {
     'land_mask': 'land_mask.tif',
     'shore_mask': 'shore_mask.tif',
     'shore_convolution': 'shore_convolution.tif',
+    'shore_polygon': 'shore_polygon.shp'
     }
 
 _TMP_BASE_FILES = {
@@ -90,19 +91,32 @@ def execute(args):
 
     shore_convolution_nodata = pygeoprocessing.get_nodata_from_uri(
         f_reg['shore_convolution'])
+
     def _shore_mask(shore_convolution):
         result = numpy.empty(shore_convolution.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
         valid_mask = shore_convolution != shore_convolution_nodata
         result[valid_mask] = numpy.where(
             (shore_convolution[valid_mask] >= 9) &
-            (shore_convolution[valid_mask] < 17), 1, 0)
+            (shore_convolution[valid_mask] < 17), 1, _MASK_NODATA)
         return result
     pygeoprocessing.vectorize_datasets(
         [f_reg['shore_convolution']], _shore_mask, f_reg['shore_mask'],
         gdal.GDT_Int16, _MASK_NODATA, dem_pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
+    shore_raster = gdal.Open(f_reg['shore_mask'])
+    shore_band = shore_raster.GetRasterBand(1)
+
+    esri_driver = ogr.GetDriverByName("ESRI Shapefile")
+    if os.path.exists(f_reg['shore_polygon']):
+        os.remove(f_reg['shore_polygon'])
+    shore_polygon = esri_driver.CreateDataSource(f_reg['shore_polygon'])
+
+    target_sr = osr.SpatialReference(shore_raster.GetProjection())
+    shore_layer = shore_polygon.CreateLayer(
+        'shore', srs=target_sr)
+    gdal.Polygonize(shore_band, shore_band, shore_layer, -1, ["8CONNECTED"])
 
     # GENERATE SHORELINE PIXELS
     # GENERATE SHORELINE SHAPE
