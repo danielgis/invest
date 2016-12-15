@@ -3,15 +3,12 @@ import os
 import logging
 
 from osgeo import gdal
-from osgeo import ogr
 from osgeo import osr
 import numpy
-
+import rtree
 import pygeoprocessing
-from . import utils
 
-logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
-%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
+from . import utils
 
 LOGGER = logging.getLogger('natcap.invest.profile_generator')
 _OUTPUT_BASE_FILES = {
@@ -29,6 +26,7 @@ _TMP_BASE_FILES = {
     }
 
 _MASK_NODATA = -1
+
 
 def execute(args):
     """Profile generator.
@@ -106,24 +104,44 @@ def execute(args):
         vectorize_op=False, datasets_are_pre_aligned=True)
 
     shore_raster = gdal.Open(f_reg['shore_mask'])
-    shore_band = shore_raster.GetRasterBand(1)
+    shore_geotransform = shore_raster.GetGeoTransform()
+    #shore_band = shore_raster.GetRasterBand(1)
 
-    esri_driver = ogr.GetDriverByName("ESRI Shapefile")
-    if os.path.exists(f_reg['shore_polygon']):
-        os.remove(f_reg['shore_polygon'])
-    shore_polygon = esri_driver.CreateDataSource(f_reg['shore_polygon'])
+    #esri_driver = ogr.GetDriverByName("ESRI Shapefile")
+    #if os.path.exists(f_reg['shore_polygon']):
+    #    os.remove(f_reg['shore_polygon'])
+    #shore_polygon = esri_driver.CreateDataSource(f_reg['shore_polygon'])
 
-    target_sr = osr.SpatialReference(shore_raster.GetProjection())
-    shore_layer = shore_polygon.CreateLayer(
-        'shore', srs=target_sr)
-    gdal.Polygonize(shore_band, shore_band, shore_layer, -1, ["8CONNECTED"])
+    #target_sr = osr.SpatialReference(shore_raster.GetProjection())
+    #shore_layer = shore_polygon.CreateLayer(
+    #    'shore', srs=target_sr)
+    #gdal.Polygonize(shore_band, shore_band, shore_layer, -1, ["8CONNECTED"])
+
+    shore_point_index = rtree.index.Index()
+    LOGGER.info('Building spatial index for shore points')
+    for offset_info, data_block in pygeoprocessing.iterblocks(
+            f_reg['shore_mask']):
+        row_indexes, col_indexes = numpy.mgrid[
+            offset_info['yoff']:offset_info['yoff']+offset_info['win_ysize'],
+            offset_info['xoff']:offset_info['xoff']+offset_info['win_xsize']]
+        valid_mask = data_block == 1
+        x_coordinates = (
+            shore_geotransform[0] +
+            shore_geotransform[1] * col_indexes[valid_mask] +
+            shore_geotransform[2] * row_indexes[valid_mask])
+        y_coordinates = (
+            shore_geotransform[3] +
+            shore_geotransform[4] * col_indexes[valid_mask] +
+            shore_geotransform[5] * row_indexes[valid_mask])
+        for x_coord, y_coord in zip(x_coordinates, y_coordinates):
+            shore_point_index.insert(0, (x_coord, y_coord))
 
     # GENERATE SHORELINE PIXELS
-    # GENERATE SHORELINE SHAPE
-    # SMOOTH SHORLINE SHAPE?
+    # PUT SHORELINE PIXELS INTO R-TREE
     # FOR EACH POINT:
-    #   SNAP POINT TO NEAREST POINT ON LINE
-    #   POINT IN DOWNWARD DIRECTION?
+    #   FIND NEAREST SHORELINE POINT
+    #   CALCUALTE DIRECTION AS SHORE POINT TO SAMPLE POINT
+    #   CREATE A LINE ROOTED AT SHORE PIXEL AS LONG AS REQUEST
     #   WALK ALONG LINE FOR EACH STEP:
     #       CALCULATE COORDINATE
     #       SAMPLE RASTER UNDERNEATH

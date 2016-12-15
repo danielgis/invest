@@ -1,5 +1,12 @@
 """Profile generator test."""
+import logging
+
 import natcap.invest.profile_generator
+
+logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
+%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
+
+LOGGER = logging.getLogger('test_profile_generator')
 
 
 def main():
