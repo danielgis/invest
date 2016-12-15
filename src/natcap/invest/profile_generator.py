@@ -50,6 +50,19 @@ def execute(args):
     """
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
 
+
+    # GENERATE SHORELINE PIXELS
+    # GENERATE SHORELINE SHAPE
+    # SMOOTH SHORLINE SHAPE?
+    # FOR EACH POINT:
+    #   SNAP POINT TO NEAREST POINT ON LINE
+    #   POINT IN DOWNWARD DIRECTION?
+    #   WALK ALONG LINE FOR EACH STEP:
+    #       CALCULATE COORDINATE
+    #       SAMPLE RASTER UNDERNEATH
+    #       SAMPLE HABITAT LAYER UNDERNEATH
+
+
     biophysical_table = pygeoprocessing.get_lookup_from_csv(
         args['biophysical_table_path'], 'lucode')
 
