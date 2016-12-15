@@ -4,6 +4,7 @@ import logging
 
 from osgeo import gdal
 from osgeo import ogr
+from osgeo import osr
 import numpy
 
 import pygeoprocessing
@@ -19,6 +20,7 @@ _OUTPUT_BASE_FILES = {
 _INTERMEDIATE_BASE_FILES = {
     'land_mask': 'land_mask.tif',
     'shore_mask': 'shore_mask.tif',
+    'shore_convolution': 'shore_convolution.tif',
     }
 
 _TMP_BASE_FILES = {
@@ -81,10 +83,26 @@ def execute(args):
         gdal.GDT_Int16, _MASK_NODATA, dem_pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
-    _make_shore_kernel(f_reg['kernel_path'])
+    _make_shore_kernel(f_reg['shore_kernel'])
 
     pygeoprocessing.convolve_2d_uri(
-        f_reg['land_mask'], f_reg['kernel_path'], f_reg['shore_mask'])
+        f_reg['land_mask'], f_reg['shore_kernel'], f_reg['shore_convolution'])
+
+    shore_convolution_nodata = pygeoprocessing.get_nodata_from_uri(
+        f_reg['shore_convolution'])
+    def _shore_mask(shore_convolution):
+        result = numpy.empty(shore_convolution.shape, dtype=numpy.int16)
+        result[:] = _MASK_NODATA
+        valid_mask = shore_convolution != shore_convolution_nodata
+        result[valid_mask] = numpy.where(
+            (shore_convolution[valid_mask] >= 9) &
+            (shore_convolution[valid_mask] < 17), 1, 0)
+        return result
+    pygeoprocessing.vectorize_datasets(
+        [f_reg['shore_convolution']], _shore_mask, f_reg['shore_mask'],
+        gdal.GDT_Int16, _MASK_NODATA, dem_pixel_size, 'intersection',
+        vectorize_op=False, datasets_are_pre_aligned=True)
+
 
     # GENERATE SHORELINE PIXELS
     # GENERATE SHORELINE SHAPE
@@ -114,4 +132,5 @@ def _make_shore_kernel(kernel_path):
     kernel_raster.SetProjection(srs.ExportToWkt())
 
     kernel_band = kernel_raster.GetRasterBand(1)
-    kernel_band.WriteAsArray(numpy.array([[1, 1, 1], [1, 9, 1], [1, 1, 1]]))
+    kernel_band.SetNoDataValue(255)
+    kernel_band.WriteArray(numpy.array([[1, 1, 1], [1, 9, 1], [1, 1, 1]]))
