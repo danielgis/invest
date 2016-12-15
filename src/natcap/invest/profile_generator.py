@@ -22,6 +22,7 @@ _INTERMEDIATE_BASE_FILES = {
     }
 
 _TMP_BASE_FILES = {
+    'shore_kernel': 'shore_kernel.tif',
     }
 
 _MASK_NODATA = -1
@@ -80,8 +81,10 @@ def execute(args):
         gdal.GDT_Int16, _MASK_NODATA, dem_pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
+    _make_shore_kernel(f_reg['kernel_path'])
+
     pygeoprocessing.convolve_2d_uri(
-        f_reg['land_mask'], kernel_path, output_path)
+        f_reg['land_mask'], f_reg['kernel_path'], f_reg['shore_mask'])
 
     # GENERATE SHORELINE PIXELS
     # GENERATE SHORELINE SHAPE
@@ -93,3 +96,22 @@ def execute(args):
     #       CALCULATE COORDINATE
     #       SAMPLE RASTER UNDERNEATH
     #       SAMPLE HABITAT LAYER UNDERNEATH
+
+
+def _make_shore_kernel(kernel_path):
+    """Makes a 3x3 raster with a 9 in the middle and 1s on the outside."""
+    driver = gdal.GetDriverByName('GTiff')
+    kernel_raster = driver.Create(
+        kernel_path.encode('utf-8'), 3, 3, 1,
+        gdal.GDT_Byte)
+
+    # Make some kind of geotransform, it doesn't matter what but
+    # will make GIS libraries behave better if it's all defined
+    kernel_raster.SetGeoTransform([444720, 30, 0, 3751320, 0, -30])
+    srs = osr.SpatialReference()
+    srs.SetUTM(11, 1)
+    srs.SetWellKnownGeogCS('NAD27')
+    kernel_raster.SetProjection(srs.ExportToWkt())
+
+    kernel_band = kernel_raster.GetRasterBand(1)
+    kernel_band.WriteAsArray(numpy.array([[1, 1, 1], [1, 9, 1], [1, 1, 1]]))
