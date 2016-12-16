@@ -19,7 +19,8 @@ _INTERMEDIATE_BASE_FILES = {
     'land_mask': 'land_mask.tif',
     'shore_mask': 'shore_mask.tif',
     'shore_convolution': 'shore_convolution.tif',
-    'shore_points': 'shore_points.shp'
+    'shore_points': 'shore_points.shp',
+    'profile_lines': 'profile_lines.shp'
     }
 
 _TMP_BASE_FILES = {
@@ -136,11 +137,41 @@ def execute(args):
             shore_geotransform[5] * (row_indexes[valid_mask] + 0.5))
         for x_coord, y_coord in zip(x_coordinates, y_coordinates):
             point_feature = ogr.Feature(shore_point_layer_defn)
-            shore_point_index.insert(0, (x_coord, y_coord))
+            shore_point_index.insert(
+                0, (x_coord, y_coord), obj=(x_coord, y_coord))
             point_geometry = ogr.Geometry(ogr.wkbPoint)
             point_geometry.AddPoint(x_coord, y_coord)
             point_feature.SetGeometry(point_geometry)
             shore_point_layer.CreateFeature(point_feature)
+
+    if os.path.exists(f_reg['profile_lines']):
+        os.remove(f_reg['profile_lines'])
+    profile_lines = esri_driver.CreateDataSource(f_reg['profile_lines'])
+
+    target_sr = osr.SpatialReference(shore_raster.GetProjection())
+    profile_lines_layer = profile_lines.CreateLayer(
+        'profile_lines', srs=target_sr, geom_type=ogr.wkbLineString)
+    profile_lines_layer_defn = profile_lines_layer.GetLayerDefn()
+
+    LOGGER.info("Constructing offshore profiles")
+    sample_point_vector = ogr.Open(args['sample_point_vector_path'])
+    for sample_point_layer in sample_point_vector:
+        for sample_point in sample_point_layer:
+            LOGGER.debug(sample_point)
+            sample_point_geometry = sample_point.GetGeometryRef()
+            sample_point = sample_point_geometry.GetPoint(0)
+            closest_point = shore_point_index.nearest(
+                (sample_point[0], sample_point[1]),
+                objects=True).next().object
+            LOGGER.debug("Closest point: %s", closest_point)
+            line_feature = ogr.Feature(profile_lines_layer_defn)
+            profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
+            profile_line_geometry.AddPoint(
+                sample_point[0], sample_point[1])
+            profile_line_geometry.AddPoint(
+                closest_point[0], closest_point[1])
+            line_feature.SetGeometry(profile_line_geometry)
+            profile_lines_layer.CreateFeature(line_feature)
 
     # GENERATE SHORELINE PIXELS
     # FOR EACH POINT:
