@@ -2,6 +2,7 @@
 import os
 import logging
 
+import scipy.interpolate
 from osgeo import gdal
 from osgeo import osr
 from osgeo import ogr
@@ -20,11 +21,13 @@ _INTERMEDIATE_BASE_FILES = {
     'shore_mask': 'shore_mask.tif',
     'shore_convolution': 'shore_convolution.tif',
     'shore_points': 'shore_points.shp',
-    'profile_lines': 'profile_lines.shp'
+    'profile_lines': 'profile_lines.shp',
+    'sample_points': 'sample_points.shp'
     }
 
 _TMP_BASE_FILES = {
     'shore_kernel': 'shore_kernel.tif',
+    'clipped_bathymetry': 'clipped_bathymetry.tif'
     }
 
 _MASK_NODATA = -1
@@ -77,11 +80,11 @@ def execute(args):
             dem[valid_mask] >= args['shore_height'], 1, 0)
         return result
 
-    dem_pixel_size = pygeoprocessing.get_cell_size_from_uri(
+    bathymetry_pixel_size = pygeoprocessing.get_cell_size_from_uri(
         args['bathymetry_path'])
     pygeoprocessing.vectorize_datasets(
         [args['bathymetry_path']], _land_mask_op, f_reg['land_mask'],
-        gdal.GDT_Int16, _MASK_NODATA, dem_pixel_size, 'intersection',
+        gdal.GDT_Int16, _MASK_NODATA, bathymetry_pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
     _make_shore_kernel(f_reg['shore_kernel'])
@@ -102,7 +105,7 @@ def execute(args):
         return result
     pygeoprocessing.vectorize_datasets(
         [f_reg['shore_convolution']], _shore_mask, f_reg['shore_mask'],
-        gdal.GDT_Int16, _MASK_NODATA, dem_pixel_size, 'intersection',
+        gdal.GDT_Int16, _MASK_NODATA, bathymetry_pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
     shore_raster = gdal.Open(f_reg['shore_mask'])
@@ -144,15 +147,6 @@ def execute(args):
             point_feature.SetGeometry(point_geometry)
             shore_point_layer.CreateFeature(point_feature)
 
-    if os.path.exists(f_reg['profile_lines']):
-        os.remove(f_reg['profile_lines'])
-    profile_lines = esri_driver.CreateDataSource(f_reg['profile_lines'])
-
-    target_sr = osr.SpatialReference(shore_raster.GetProjection())
-    profile_lines_layer = profile_lines.CreateLayer(
-        'profile_lines', srs=target_sr, geom_type=ogr.wkbLineString)
-    profile_lines_layer_defn = profile_lines_layer.GetLayerDefn()
-
     LOGGER.info("Constructing offshore profiles")
     sample_point_vector = ogr.Open(args['sample_point_vector_path'])
     for sample_point_layer in sample_point_vector:
@@ -164,6 +158,45 @@ def execute(args):
                 (sample_point[0], sample_point[1]),
                 objects=True).next().object
             LOGGER.debug("Closest point: %s", closest_point)
+
+            if os.path.exists(f_reg['sample_points']):
+                os.remove(f_reg['sample_points'])
+            sample_points_vector = esri_driver.CreateDataSource(
+                f_reg['sample_points'])
+            target_sr = osr.SpatialReference(shore_raster.GetProjection())
+            sample_points_layer = sample_points_vector.CreateLayer(
+                'sample_points', srs=target_sr, geom_type=ogr.wkbPoint)
+            sample_points_layer_defn = sample_points_layer.GetLayerDefn()
+
+            vector_length = (
+                (sample_point[0]-closest_point[0]) ** 2 +
+                (sample_point[1]-closest_point[1]) ** 2) ** 0.5
+            x_size = (sample_point[0]-closest_point[0]) / vector_length
+            y_size = (sample_point[1]-closest_point[1]) / vector_length
+
+            step_size = 10
+            length = 2000
+
+            for step in numpy.arange(0, length, step_size):
+                point_feature = ogr.Feature(sample_points_layer_defn)
+                sample_point_geometry = ogr.Geometry(ogr.wkbPoint)
+                sample_point_geometry.AddPoint(
+                    closest_point[0] + x_size * step,
+                    closest_point[1] + y_size * step)
+                point_feature.SetGeometry(sample_point_geometry)
+                sample_points_layer.CreateFeature(point_feature)
+            sample_points_layer.SyncToDisk()
+            sample_points_layer = None
+            sample_points_vector = None
+
+            if os.path.exists(f_reg['profile_lines']):
+                os.remove(f_reg['profile_lines'])
+            profile_lines_vector = esri_driver.CreateDataSource(
+                f_reg['profile_lines'])
+            target_sr = osr.SpatialReference(shore_raster.GetProjection())
+            profile_lines_layer = profile_lines_vector.CreateLayer(
+                'profile_lines', srs=target_sr, geom_type=ogr.wkbLineString)
+            profile_lines_layer_defn = profile_lines_layer.GetLayerDefn()
             line_feature = ogr.Feature(profile_lines_layer_defn)
             profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
             profile_line_geometry.AddPoint(
@@ -172,7 +205,43 @@ def execute(args):
                 closest_point[0], closest_point[1])
             line_feature.SetGeometry(profile_line_geometry)
             profile_lines_layer.CreateFeature(line_feature)
+            profile_lines_layer.SyncToDisk()
+            profile_lines_layer = None
+            profile_lines_vector = None
 
+            pygeoprocessing.align_dataset_list(
+                [args['bathymetry_path']], [f_reg['clipped_bathymetry']],
+                ['bilinear'], bathymetry_pixel_size, 'intersection', -1,
+                aoi_uri=f_reg['profile_lines'], all_touched=True)
+
+            shore_geotransform = shore_raster.GetGeoTransform()
+
+            clipped_bathymetry_raster = gdal.Open(f_reg['clipped_bathymetry'])
+            clipped_bathymetry_band = (
+                clipped_bathymetry_raster.GetRasterBand(1))
+            clipped_bathymetry_array = clipped_bathymetry_band.ReadAsArray()
+
+            clipped_bathymetry_gt = pygeoprocessing.get_geotransform_uri(
+                f_reg['clipped_bathymetry'])
+
+            row_indexes, col_indexes = numpy.mgrid[
+                0:clipped_bathymetry_array.shape[0],
+                0:clipped_bathymetry_array.shape[1]]
+            x_coordinates = (
+                clipped_bathymetry_gt[0] +
+                clipped_bathymetry_gt[1] * (col_indexes + 0.5) +
+                clipped_bathymetry_gt[2] * (row_indexes + 0.5))
+            y_coordinates = (
+                clipped_bathymetry_gt[3] +
+                clipped_bathymetry_gt[4] * (col_indexes + 0.5) +
+                clipped_bathymetry_gt[5] * (row_indexes + 0.5))
+            LOGGER.debug(x_coordinates.shape)
+            LOGGER.debug(y_coordinates.shape)
+            LOGGER.debug(clipped_bathymetry_array.shape)
+            interp_fn = scipy.interpolate.interp2d(
+                x_coordinates, y_coordinates,
+                clipped_bathymetry_array)
+            interp_fn(clipped_bathymetry_gt[0], clipped_bathymetry_gt[3])
     # GENERATE SHORELINE PIXELS
     # FOR EACH POINT:
     #   FIND NEAREST SHORELINE POINT
