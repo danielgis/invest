@@ -4,6 +4,7 @@ import logging
 
 from osgeo import gdal
 from osgeo import osr
+from osgeo import ogr
 import numpy
 import rtree
 import pygeoprocessing
@@ -18,7 +19,7 @@ _INTERMEDIATE_BASE_FILES = {
     'land_mask': 'land_mask.tif',
     'shore_mask': 'shore_mask.tif',
     'shore_convolution': 'shore_convolution.tif',
-    'shore_polygon': 'shore_polygon.shp'
+    'shore_points': 'shore_points.shp'
     }
 
 _TMP_BASE_FILES = {
@@ -105,18 +106,18 @@ def execute(args):
 
     shore_raster = gdal.Open(f_reg['shore_mask'])
     shore_geotransform = shore_raster.GetGeoTransform()
-    #shore_band = shore_raster.GetRasterBand(1)
 
-    #esri_driver = ogr.GetDriverByName("ESRI Shapefile")
-    #if os.path.exists(f_reg['shore_polygon']):
-    #    os.remove(f_reg['shore_polygon'])
-    #shore_polygon = esri_driver.CreateDataSource(f_reg['shore_polygon'])
+    esri_driver = ogr.GetDriverByName("ESRI Shapefile")
+    if os.path.exists(f_reg['shore_points']):
+        os.remove(f_reg['shore_points'])
+    shore_points = esri_driver.CreateDataSource(f_reg['shore_points'])
 
-    #target_sr = osr.SpatialReference(shore_raster.GetProjection())
-    #shore_layer = shore_polygon.CreateLayer(
-    #    'shore', srs=target_sr)
-    #gdal.Polygonize(shore_band, shore_band, shore_layer, -1, ["8CONNECTED"])
+    target_sr = osr.SpatialReference(shore_raster.GetProjection())
+    shore_point_layer = shore_points.CreateLayer(
+        'shore_points', srs=target_sr, geom_type=ogr.wkbPoint)
+    shore_point_layer_defn = shore_point_layer.GetLayerDefn()
 
+    # PUT SHORELINE PIXELS INTO R-TREE
     shore_point_index = rtree.index.Index()
     LOGGER.info('Building spatial index for shore points')
     for offset_info, data_block in pygeoprocessing.iterblocks(
@@ -127,17 +128,21 @@ def execute(args):
         valid_mask = data_block == 1
         x_coordinates = (
             shore_geotransform[0] +
-            shore_geotransform[1] * col_indexes[valid_mask] +
-            shore_geotransform[2] * row_indexes[valid_mask])
+            shore_geotransform[1] * (col_indexes[valid_mask] + 0.5) +
+            shore_geotransform[2] * (row_indexes[valid_mask] + 0.5))
         y_coordinates = (
             shore_geotransform[3] +
-            shore_geotransform[4] * col_indexes[valid_mask] +
-            shore_geotransform[5] * row_indexes[valid_mask])
+            shore_geotransform[4] * (col_indexes[valid_mask] + 0.5) +
+            shore_geotransform[5] * (row_indexes[valid_mask] + 0.5))
         for x_coord, y_coord in zip(x_coordinates, y_coordinates):
+            point_feature = ogr.Feature(shore_point_layer_defn)
             shore_point_index.insert(0, (x_coord, y_coord))
+            point_geometry = ogr.Geometry(ogr.wkbPoint)
+            point_geometry.AddPoint(x_coord, y_coord)
+            point_feature.SetGeometry(point_geometry)
+            shore_point_layer.CreateFeature(point_feature)
 
     # GENERATE SHORELINE PIXELS
-    # PUT SHORELINE PIXELS INTO R-TREE
     # FOR EACH POINT:
     #   FIND NEAREST SHORELINE POINT
     #   CALCUALTE DIRECTION AS SHORE POINT TO SAMPLE POINT
