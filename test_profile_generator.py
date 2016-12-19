@@ -14,11 +14,12 @@ def main():
     args = {
         'workspace_dir': 'delete_profile_generator_workspace',
         'results_suffix': 'test',
-        'bathymetry_path': r"E:\repositories\bitbucket_repos\invest\data\invest-data\Base_Data\Marine\DEMs\claybark_dem",
+        'bathymetry_path': r"C:\Users\Daddy\Documents\clipped_claybark.tif",
         'shore_height': 0.0,
-        'sample_point_vector_path': r"C:\Users\Daddy\Documents\representative_profile_points.shp",
+        'representative_point_vector_path': r"C:\Users\Daddy\Documents\representative_profile_points.shp",
         'feature_id_key': 'name',
-        'step_size': 90,
+        'step_size': 10,
+        'profile_length': 600,
         'habitat_vector_path_list': [],
     }
     natcap.invest.profile_generator.execute(args)

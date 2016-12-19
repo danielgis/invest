@@ -47,10 +47,12 @@ def execute(args):
         args['shore_height'] (float): value in bathymetry raster that
             represents the shoreline elevation.  In most cases this would be
             0.
-        args['sample_point_vector_path'] (string): Path to a point vector file
+        args['representative_point_vector_path'] (string): Path to a point vector file
             that contains points from which to sample bathymetry.
         args['step_size'] (float): the number of linear units per step to
-            sample the profile
+            sample the profile.
+        args['profile_length'] (float): the length of the profile from off
+            the shore in linear units.
         args['habitat_vector_path_list'] (list): List of paths to vector files
             that represent habitat layers.  The presence of overlap/no overlap
             will be included in the profile results.
@@ -148,17 +150,15 @@ def execute(args):
             shore_point_layer.CreateFeature(point_feature)
 
     LOGGER.info("Constructing offshore profiles")
-    sample_point_vector = ogr.Open(args['sample_point_vector_path'])
-    for sample_point_layer in sample_point_vector:
-        for sample_point in sample_point_layer:
-            LOGGER.debug(sample_point)
-            sample_point_geometry = sample_point.GetGeometryRef()
-            sample_point = sample_point_geometry.GetPoint(0)
+    representative_point_vector = ogr.Open(args['representative_point_vector_path'])
+    for representative_point_layer in representative_point_vector:
+        for representative_point in representative_point_layer:
+            LOGGER.debug(representative_point)
+            representative_point_geometry = representative_point.GetGeometryRef()
+            representative_point = representative_point_geometry.GetPoint(0)
             closest_point = shore_point_index.nearest(
-                (sample_point[0], sample_point[1]),
+                (representative_point[0], representative_point[1]),
                 objects=True).next().object
-            LOGGER.debug("Closest point: %s", closest_point)
-
             if os.path.exists(f_reg['sample_points']):
                 os.remove(f_reg['sample_points'])
             sample_points_vector = esri_driver.CreateDataSource(
@@ -169,20 +169,23 @@ def execute(args):
             sample_points_layer_defn = sample_points_layer.GetLayerDefn()
 
             vector_length = (
-                (sample_point[0]-closest_point[0]) ** 2 +
-                (sample_point[1]-closest_point[1]) ** 2) ** 0.5
-            x_size = (sample_point[0]-closest_point[0]) / vector_length
-            y_size = (sample_point[1]-closest_point[1]) / vector_length
-
-            step_size = 10
-            length = 2000
-
-            for step in numpy.arange(0, length, step_size):
+                (representative_point[0]-closest_point[0]) ** 2 +
+                (representative_point[1]-closest_point[1]) ** 2) ** 0.5
+            x_size = (
+                (representative_point[0]-closest_point[0]) / vector_length)
+            y_size = (
+                (representative_point[1]-closest_point[1]) / vector_length)
+            LOGGER.debug("%s, %s", x_size, y_size)
+            sample_point_list = []
+            for step in numpy.arange(
+                    0, args['profile_length'], args['step_size']):
                 point_feature = ogr.Feature(sample_points_layer_defn)
                 sample_point_geometry = ogr.Geometry(ogr.wkbPoint)
+                sample_point_list.append(
+                    (closest_point[0] + x_size * step,
+                     closest_point[1] + y_size * step))
                 sample_point_geometry.AddPoint(
-                    closest_point[0] + x_size * step,
-                    closest_point[1] + y_size * step)
+                    sample_point_list[-1][0], sample_point_list[-1][1])
                 point_feature.SetGeometry(sample_point_geometry)
                 sample_points_layer.CreateFeature(point_feature)
             sample_points_layer.SyncToDisk()
@@ -200,9 +203,9 @@ def execute(args):
             line_feature = ogr.Feature(profile_lines_layer_defn)
             profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
             profile_line_geometry.AddPoint(
-                sample_point[0], sample_point[1])
-            profile_line_geometry.AddPoint(
                 closest_point[0], closest_point[1])
+            profile_line_geometry.AddPoint(
+                sample_point_list[-1][0], sample_point_list[-1][1])
             line_feature.SetGeometry(profile_line_geometry)
             profile_lines_layer.CreateFeature(line_feature)
             profile_lines_layer.SyncToDisk()
@@ -240,13 +243,12 @@ def execute(args):
                 clipped_bathymetry_gt[3] +
                 clipped_bathymetry_gt[4] * (col_indexes + 0.5) +
                 clipped_bathymetry_gt[5] * (row_indexes + 0.5))
-            LOGGER.debug(x_coordinates.shape)
-            LOGGER.debug(y_coordinates.shape)
-            LOGGER.debug(clipped_bathymetry_array.shape)
             interp_fn = scipy.interpolate.interp2d(
                 x_coordinates, y_coordinates,
                 clipped_bathymetry_array)
-            interp_fn(clipped_bathymetry_gt[0], clipped_bathymetry_gt[3])
+            for x_coord, y_coord in sample_point_list:
+                value = interp_fn(x_coord, y_coord)
+                LOGGER.debug(value)
     # GENERATE SHORELINE PIXELS
     # FOR EACH POINT:
     #   FIND NEAREST SHORELINE POINT
@@ -276,3 +278,4 @@ def _make_shore_kernel(kernel_path):
     kernel_band = kernel_raster.GetRasterBand(1)
     kernel_band.SetNoDataValue(255)
     kernel_band.WriteArray(numpy.array([[1, 1, 1], [1, 9, 1], [1, 1, 1]]))
+
