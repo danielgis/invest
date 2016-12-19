@@ -47,8 +47,8 @@ def execute(args):
         args['shore_height'] (float): value in bathymetry raster that
             represents the shoreline elevation.  In most cases this would be
             0.
-        args['representative_point_vector_path'] (string): Path to a point vector file
-            that contains points from which to sample bathymetry.
+        args['representative_point_vector_path'] (string): Path to a point
+            vector file that contains points from which to sample bathymetry.
         args['step_size'] (float): the number of linear units per step to
             sample the profile.
         args['profile_length'] (float): the length of the profile from off
@@ -72,14 +72,16 @@ def execute(args):
          (_INTERMEDIATE_BASE_FILES, intermediate_output_dir),
          (_TMP_BASE_FILES, output_dir)], file_suffix)
 
-    dem_nodata = pygeoprocessing.get_nodata_from_uri(args['bathymetry_path'])
+    bathymetry_nodata = pygeoprocessing.get_nodata_from_uri(
+        args['bathymetry_path'])
 
-    def _land_mask_op(dem):
-        result = numpy.empty(dem.shape, dtype=numpy.int16)
+    def _land_mask_op(bathymetry):
+        """Mask values >= shore height."""
+        result = numpy.empty(bathymetry.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
-        valid_mask = dem != dem_nodata
+        valid_mask = bathymetry != bathymetry_nodata
         result[valid_mask] = numpy.where(
-            dem[valid_mask] >= args['shore_height'], 1, 0)
+            bathymetry[valid_mask] >= args['shore_height'], 1, 0)
         return result
 
     bathymetry_pixel_size = pygeoprocessing.get_cell_size_from_uri(
@@ -100,6 +102,7 @@ def execute(args):
         f_reg['shore_convolution'])
 
     def _shore_mask(shore_convolution):
+        """Mask values on land that border water."""
         result = numpy.empty(shore_convolution.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
         valid_mask = shore_convolution != shore_convolution_nodata
@@ -161,10 +164,12 @@ def execute(args):
     sample_points_layer_defn = sample_points_layer.GetLayerDefn()
 
     LOGGER.info("Constructing offshore profiles")
-    representative_point_vector = ogr.Open(args['representative_point_vector_path'])
+    representative_point_vector = ogr.Open(
+        args['representative_point_vector_path'])
     for representative_point_layer in representative_point_vector:
         for representative_point in representative_point_layer:
-            representative_point_geometry = representative_point.GetGeometryRef()
+            representative_point_geometry = (
+                representative_point.GetGeometryRef())
             representative_point = representative_point_geometry.GetPoint(0)
             closest_point = shore_point_index.nearest(
                 (representative_point[0], representative_point[1]),
@@ -209,17 +214,18 @@ def execute(args):
             profile_lines_layer.CreateFeature(line_feature)
             profile_lines_layer.SyncToDisk()
             extent = profile_lines_layer.GetExtent()
-            # (293293.1053471282, 293438.99768751714, 5437807.538167862, 5438379.215896146)
-            # xmin, xmax, ymin, ymax
-            # convert extent to DEM index extent
+            # convert extent to bathymetry index extent
             bathymetry_gt = pygeoprocessing.get_geotransform_uri(
                 args['bathymetry_path'])
 
+            # reverse last two because y coord moves up while pixels move down
             extent_in_pixel_coords = (
                 int((extent[0] - bathymetry_gt[0]) / bathymetry_gt[1]),
                 int((extent[1] - bathymetry_gt[0]) / bathymetry_gt[1]),
-                int(round(0.5+(extent[3] - bathymetry_gt[3]) / bathymetry_gt[5])),
-                int(round(0.5+(extent[2] - bathymetry_gt[3]) / bathymetry_gt[5])))
+                int(round(0.5+(extent[3] - bathymetry_gt[3]) /
+                          bathymetry_gt[5])),
+                int(round(0.5+(extent[2] - bathymetry_gt[3]) /
+                          bathymetry_gt[5])))
             offset_dict = {
                 'xoff': extent_in_pixel_coords[0],
                 'yoff': extent_in_pixel_coords[2],
@@ -248,7 +254,9 @@ def execute(args):
                 bathymetry_gt[3] +
                 (y_coordinates + offset_dict['yoff']) * bathymetry_gt[5])[::-1]
 
-            LOGGER.debug("%s, %s, %s", x_coordinates.shape, y_coordinates.shape, clipped_bathymetry_array.shape)
+            LOGGER.debug(
+                "%s, %s, %s", x_coordinates.shape, y_coordinates.shape,
+                clipped_bathymetry_array.shape)
             interp_fn = scipy.interpolate.RectBivariateSpline(
                 y_coordinates, x_coordinates, clipped_bathymetry_array,
                 kx=1, ky=1)
@@ -268,8 +276,9 @@ def execute(args):
     sample_points_layer = None
     sample_points_vector = None
 
+
 def _make_shore_kernel(kernel_path):
-    """Makes a 3x3 raster with a 9 in the middle and 1s on the outside."""
+    """Make a 3x3 raster with a 9 in the middle and 1s on the outside."""
     driver = gdal.GetDriverByName('GTiff')
     kernel_raster = driver.Create(
         kernel_path.encode('utf-8'), 3, 3, 1,
@@ -286,4 +295,3 @@ def _make_shore_kernel(kernel_path):
     kernel_band = kernel_raster.GetRasterBand(1)
     kernel_band.SetNoDataValue(255)
     kernel_band.WriteArray(numpy.array([[1, 1, 1], [1, 9, 1], [1, 1, 1]]))
-
