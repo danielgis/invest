@@ -89,6 +89,8 @@ def execute(args):
         gdal.GDT_Int16, _MASK_NODATA, bathymetry_pixel_size, 'intersection',
         vectorize_op=False, datasets_are_pre_aligned=True)
 
+    bathymetry_raster = gdal.Open(args['bathymetry_path'])
+    bathymetry_band = bathymetry_raster.GetRasterBand(1)
     _make_shore_kernel(f_reg['shore_kernel'])
 
     pygeoprocessing.convolve_2d_uri(
@@ -162,7 +164,6 @@ def execute(args):
     representative_point_vector = ogr.Open(args['representative_point_vector_path'])
     for representative_point_layer in representative_point_vector:
         for representative_point in representative_point_layer:
-            LOGGER.debug(representative_point)
             representative_point_geometry = representative_point.GetGeometryRef()
             representative_point = representative_point_geometry.GetPoint(0)
             closest_point = shore_point_index.nearest(
@@ -207,56 +208,50 @@ def execute(args):
             line_feature.SetGeometry(profile_line_geometry)
             profile_lines_layer.CreateFeature(line_feature)
             profile_lines_layer.SyncToDisk()
+            extent = profile_lines_layer.GetExtent()
+            # (293293.1053471282, 293438.99768751714, 5437807.538167862, 5438379.215896146)
+            # xmin, xmax, ymin, ymax
+            # convert extent to DEM index extent
+            bathymetry_gt = pygeoprocessing.get_geotransform_uri(
+                args['bathymetry_path'])
+
+            extent_in_pixel_coords = (
+                int((extent[0] - bathymetry_gt[0]) / bathymetry_gt[1]),
+                int((extent[1] - bathymetry_gt[0]) / bathymetry_gt[1]),
+                int(round(0.5+(extent[3] - bathymetry_gt[3]) / bathymetry_gt[5])),
+                int(round(0.5+(extent[2] - bathymetry_gt[3]) / bathymetry_gt[5])))
+            offset_dict = {
+                'xoff': extent_in_pixel_coords[0],
+                'yoff': extent_in_pixel_coords[2],
+                'win_xsize': (
+                    extent_in_pixel_coords[1]-extent_in_pixel_coords[0]),
+                'win_ysize': (
+                    extent_in_pixel_coords[3]-extent_in_pixel_coords[2]),
+            }
+            LOGGER.debug(bathymetry_gt)
+            LOGGER.debug(extent)
+            LOGGER.debug(extent_in_pixel_coords)
+            LOGGER.debug(offset_dict)
             profile_lines_layer = None
             profile_lines_vector = None
 
-            pygeoprocessing.align_dataset_list(
-                [args['bathymetry_path']], [f_reg['clipped_bathymetry']],
-                ['bilinear'], bathymetry_pixel_size, 'intersection', -1,
-                aoi_uri=f_reg['profile_lines'], all_touched=True)
+            clipped_bathymetry_array = bathymetry_band.ReadAsArray(
+                **offset_dict)
 
-            shore_geotransform = shore_raster.GetGeoTransform()
-
-            clipped_bathymetry_raster = gdal.Open(f_reg['clipped_bathymetry'])
-            clipped_bathymetry_band = (
-                clipped_bathymetry_raster.GetRasterBand(1))
-            clipped_bathymetry_array = clipped_bathymetry_band.ReadAsArray()
-            for axis_index in xrange(2):
-                if clipped_bathymetry_array.shape[axis_index] == 1:
-                    clipped_bathymetry_array = numpy.append(
-                        clipped_bathymetry_array,
-                        clipped_bathymetry_array, axis=axis_index)
-
-            clipped_bathymetry_gt = pygeoprocessing.get_geotransform_uri(
-                f_reg['clipped_bathymetry'])
-
+            x_coordinates = numpy.arange(clipped_bathymetry_array.shape[1])
             x_coordinates = (
-                clipped_bathymetry_gt[0] +
-                clipped_bathymetry_gt[1] * (
-                    numpy.arange(clipped_bathymetry_array.shape[1]) + 0.5))
-            y_coordinates = (
-                clipped_bathymetry_gt[3] +
-                clipped_bathymetry_gt[5] * (
-                    numpy.arange(clipped_bathymetry_array.shape[0])[::-1] + 0.5))
+                bathymetry_gt[0] +
+                (x_coordinates + offset_dict['xoff']) * bathymetry_gt[1])
 
+            y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
+            y_coordinates = (
+                bathymetry_gt[3] +
+                (y_coordinates + offset_dict['yoff']) * bathymetry_gt[5])[::-1]
+
+            LOGGER.debug("%s, %s, %s", x_coordinates.shape, y_coordinates.shape, clipped_bathymetry_array.shape)
             interp_fn = scipy.interpolate.RectBivariateSpline(
                 y_coordinates, x_coordinates, clipped_bathymetry_array,
                 kx=1, ky=1)
-            LOGGER.debug("%s, %s", x_coordinates, y_coordinates)
-            """row_indexes, col_indexes = numpy.mgrid[
-                0:clipped_bathymetry_array.shape[0],
-                0:clipped_bathymetry_array.shape[1]]
-            x_coordinates = (
-                clipped_bathymetry_gt[0] +
-                clipped_bathymetry_gt[1] * (col_indexes + 0.5) +
-                clipped_bathymetry_gt[2] * (row_indexes + 0.5))
-            y_coordinates = (
-                clipped_bathymetry_gt[3] +
-                clipped_bathymetry_gt[4] * (col_indexes + 0.5) +
-                clipped_bathymetry_gt[5] * (row_indexes + 0.5))
-            interp_fn = scipy.interpolate.interp2d(
-                x_coordinates, y_coordinates,
-                clipped_bathymetry_array, fill_value=dem_nodata)"""
             for x_coord, y_coord in sample_point_list:
                 value = interp_fn(y_coord, x_coord)
                 LOGGER.debug("%s, %s, %s", y_coord, x_coord, value)
