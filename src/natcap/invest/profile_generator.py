@@ -220,6 +220,11 @@ def execute(args):
             clipped_bathymetry_band = (
                 clipped_bathymetry_raster.GetRasterBand(1))
             clipped_bathymetry_array = clipped_bathymetry_band.ReadAsArray()
+            for axis_index in xrange(2):
+                if clipped_bathymetry_array.shape[axis_index] == 1:
+                    clipped_bathymetry_array = numpy.append(
+                        clipped_bathymetry_array,
+                        clipped_bathymetry_array, axis=axis_index)
 
             clipped_bathymetry_gt = pygeoprocessing.get_geotransform_uri(
                 f_reg['clipped_bathymetry'])
