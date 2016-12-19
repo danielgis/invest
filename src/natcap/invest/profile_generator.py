@@ -149,6 +149,15 @@ def execute(args):
             point_feature.SetGeometry(point_geometry)
             shore_point_layer.CreateFeature(point_feature)
 
+    if os.path.exists(f_reg['sample_points']):
+        os.remove(f_reg['sample_points'])
+    sample_points_vector = esri_driver.CreateDataSource(
+        f_reg['sample_points'])
+    target_sr = osr.SpatialReference(shore_raster.GetProjection())
+    sample_points_layer = sample_points_vector.CreateLayer(
+        'sample_points', srs=target_sr, geom_type=ogr.wkbPoint)
+    sample_points_layer_defn = sample_points_layer.GetLayerDefn()
+
     LOGGER.info("Constructing offshore profiles")
     representative_point_vector = ogr.Open(args['representative_point_vector_path'])
     for representative_point_layer in representative_point_vector:
@@ -159,14 +168,6 @@ def execute(args):
             closest_point = shore_point_index.nearest(
                 (representative_point[0], representative_point[1]),
                 objects=True).next().object
-            if os.path.exists(f_reg['sample_points']):
-                os.remove(f_reg['sample_points'])
-            sample_points_vector = esri_driver.CreateDataSource(
-                f_reg['sample_points'])
-            target_sr = osr.SpatialReference(shore_raster.GetProjection())
-            sample_points_layer = sample_points_vector.CreateLayer(
-                'sample_points', srs=target_sr, geom_type=ogr.wkbPoint)
-            sample_points_layer_defn = sample_points_layer.GetLayerDefn()
 
             vector_length = (
                 (representative_point[0]-closest_point[0]) ** 2 +
@@ -188,9 +189,6 @@ def execute(args):
                     sample_point_list[-1][0], sample_point_list[-1][1])
                 point_feature.SetGeometry(sample_point_geometry)
                 sample_points_layer.CreateFeature(point_feature)
-            sample_points_layer.SyncToDisk()
-            sample_points_layer = None
-            sample_points_vector = None
 
             if os.path.exists(f_reg['profile_lines']):
                 os.remove(f_reg['profile_lines'])
@@ -232,7 +230,20 @@ def execute(args):
             clipped_bathymetry_gt = pygeoprocessing.get_geotransform_uri(
                 f_reg['clipped_bathymetry'])
 
-            row_indexes, col_indexes = numpy.mgrid[
+            x_coordinates = (
+                clipped_bathymetry_gt[0] +
+                clipped_bathymetry_gt[1] * (
+                    numpy.arange(clipped_bathymetry_array.shape[1]) + 0.5))
+            y_coordinates = (
+                clipped_bathymetry_gt[3] +
+                clipped_bathymetry_gt[5] * (
+                    numpy.arange(clipped_bathymetry_array.shape[0])[::-1] + 0.5))
+
+            interp_fn = scipy.interpolate.RectBivariateSpline(
+                y_coordinates, x_coordinates, clipped_bathymetry_array,
+                kx=1, ky=1)
+            LOGGER.debug("%s, %s", x_coordinates, y_coordinates)
+            """row_indexes, col_indexes = numpy.mgrid[
                 0:clipped_bathymetry_array.shape[0],
                 0:clipped_bathymetry_array.shape[1]]
             x_coordinates = (
@@ -245,10 +256,10 @@ def execute(args):
                 clipped_bathymetry_gt[5] * (row_indexes + 0.5))
             interp_fn = scipy.interpolate.interp2d(
                 x_coordinates, y_coordinates,
-                clipped_bathymetry_array)
+                clipped_bathymetry_array, fill_value=dem_nodata)"""
             for x_coord, y_coord in sample_point_list:
-                value = interp_fn(x_coord, y_coord)
-                LOGGER.debug(value)
+                value = interp_fn(y_coord, x_coord)
+                LOGGER.debug("%s, %s, %s", y_coord, x_coord, value)
     # GENERATE SHORELINE PIXELS
     # FOR EACH POINT:
     #   FIND NEAREST SHORELINE POINT
@@ -258,7 +269,9 @@ def execute(args):
     #       CALCULATE COORDINATE
     #       SAMPLE RASTER UNDERNEATH
     #       SAMPLE HABITAT LAYER UNDERNEATH
-
+    sample_points_layer.SyncToDisk()
+    sample_points_layer = None
+    sample_points_vector = None
 
 def _make_shore_kernel(kernel_path):
     """Makes a 3x3 raster with a 9 in the middle and 1s on the outside."""
