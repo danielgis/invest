@@ -14,9 +14,9 @@ def main():
     args = {
         'workspace_dir': 'delete_profile_generator_workspace',
         'results_suffix': 'test',
-        'bathymetry_path': r"C:\Users\Daddy\Documents\clipped_claybark.tif",
+        'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
         'shore_height': 0.0,
-        'representative_point_vector_path': r"C:\Users\Daddy\Documents\representative_profile_points.shp",
+        'representative_point_vector_path': r"C:\Users\rpsharp\Documents\representative_profile_points.shp",
         'feature_id_key': 'name',
         'step_size': 10,
         'profile_length': 600,
