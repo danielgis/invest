@@ -12,17 +12,15 @@ LOGGER = logging.getLogger('test_profile_generator')
 def main():
     """Entry point."""
     args = {
-        'workspace_dir': 'delete_profile_generator_workspace',
+        'workspace_dir': 'profile_generator_workspace',
         'results_suffix': 'test',
-        'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
-        #'bathymetry_path': r"C:\Users\rpsharp\Documents\bitbucket_repos\invest\data\invest-data\Base_Data\Marine\DEMs\claybark_dem",
+        'bathymetry_path': r"claybark_dem",
         'shore_height': 0.0,
-        'representative_point_vector_path': r"C:\Users\rpsharp\Documents\representative_profile_points.shp",
-        'feature_id_key': 'name',
+        'representative_point_vector_path': r"representative_profile_points.shp",
         'step_size': 20,
         'profile_length': 600,
         'habitat_vector_path_list': [
-            (r"C:\Users\rpsharp\Documents\sample_claybark_hab_a.shp", 'name')],
+            (r"sample_claybark_hab_a.shp", 'name')],
     }
     natcap.invest.profile_generator.execute(args)
 
