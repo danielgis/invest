@@ -21,13 +21,10 @@ _INTERMEDIATE_BASE_FILES = {
     'shore_mask': 'shore_mask.tif',
     'shore_convolution': 'shore_convolution.tif',
     'shore_points': 'shore_points.shp',
-    'profile_lines': 'profile_lines.shp',
-    'sample_points': 'sample_points.shp'
     }
 
 _TMP_BASE_FILES = {
     'shore_kernel': 'shore_kernel.tif',
-    'clipped_bathymetry': 'clipped_bathymetry.tif'
     }
 
 _MASK_NODATA = -1
@@ -154,20 +151,30 @@ def execute(args):
             point_feature.SetGeometry(point_geometry)
             shore_point_layer.CreateFeature(point_feature)
 
-    if os.path.exists(f_reg['sample_points']):
-        os.remove(f_reg['sample_points'])
-    sample_points_vector = esri_driver.CreateDataSource(
-        f_reg['sample_points'])
-    target_sr = osr.SpatialReference(shore_raster.GetProjection())
-    sample_points_layer = sample_points_vector.CreateLayer(
-        'sample_points', srs=target_sr, geom_type=ogr.wkbPoint)
-    sample_points_layer_defn = sample_points_layer.GetLayerDefn()
-
     LOGGER.info("Constructing offshore profiles")
     representative_point_vector = ogr.Open(
         args['representative_point_vector_path'])
     for representative_point_layer in representative_point_vector:
         for representative_point in representative_point_layer:
+            point_name = representative_point.GetField('name')
+
+            if 'sample_points' not in f_reg:
+                f_reg['sample_points'] = {}
+
+            f_reg['sample_points'][point_name] = os.path.join(
+                args['workspace_dir'], 'sample_points_%s.shp' % point_name)
+            if os.path.exists(f_reg['sample_points'][point_name]):
+                os.remove(f_reg['sample_points'][point_name])
+            sample_points_vector = esri_driver.CreateDataSource(
+                f_reg['sample_points'][point_name])
+            target_sr = osr.SpatialReference(shore_raster.GetProjection())
+            sample_points_layer = sample_points_vector.CreateLayer(
+                'sample_points_%s' % point_name, srs=target_sr,
+                geom_type=ogr.wkbPoint)
+            sample_points_layer.CreateField(
+                ogr.FieldDefn("s_depth", ogr.OFTReal))
+            sample_points_layer_defn = sample_points_layer.GetLayerDefn()
+
             representative_point_geometry = (
                 representative_point.GetGeometryRef())
             representative_point = representative_point_geometry.GetPoint(0)
@@ -196,13 +203,19 @@ def execute(args):
                 point_feature.SetGeometry(sample_point_geometry)
                 sample_points_layer.CreateFeature(point_feature)
 
-            if os.path.exists(f_reg['profile_lines']):
-                os.remove(f_reg['profile_lines'])
+            sample_points_layer.SyncToDisk()
+            if 'profile_lines' not in f_reg:
+                f_reg['profile_lines'] = {}
+            f_reg['profile_lines'][point_name] = os.path.join(
+                args['workspace_dir'], 'profile_line_%s.shp' % point_name)
+            if os.path.exists(f_reg['profile_lines'][point_name]):
+                os.remove(f_reg['profile_lines'][point_name])
             profile_lines_vector = esri_driver.CreateDataSource(
-                f_reg['profile_lines'])
+                f_reg['profile_lines'][point_name])
             target_sr = osr.SpatialReference(shore_raster.GetProjection())
             profile_lines_layer = profile_lines_vector.CreateLayer(
-                'profile_lines', srs=target_sr, geom_type=ogr.wkbLineString)
+                'profile_lines_%s' % point_name, srs=target_sr,
+                geom_type=ogr.wkbLineString)
             profile_lines_layer_defn = profile_lines_layer.GetLayerDefn()
             line_feature = ogr.Feature(profile_lines_layer_defn)
             profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
@@ -250,9 +263,13 @@ def execute(args):
                 (x_coordinates + offset_dict['xoff']) * bathymetry_gt[1])
 
             y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
+            # reverse the y coordinates so they are increasing
             y_coordinates = (
                 bathymetry_gt[3] +
                 (y_coordinates + offset_dict['yoff']) * bathymetry_gt[5])[::-1]
+
+            # reverse the rows in the array so they match y coordinates
+            clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
 
             LOGGER.debug(
                 "%s, %s, %s", x_coordinates.shape, y_coordinates.shape,
@@ -260,9 +277,17 @@ def execute(args):
             interp_fn = scipy.interpolate.RectBivariateSpline(
                 y_coordinates, x_coordinates, clipped_bathymetry_array,
                 kx=1, ky=1)
-            for x_coord, y_coord in sample_point_list:
-                value = interp_fn(y_coord, x_coord)
-                LOGGER.debug("%s, %s, %s", y_coord, x_coord, value)
+            for sample_point in sample_points_layer:
+                sample_point_geometry = sample_point.GetGeometryRef()
+                x_coord = sample_point_geometry.GetX()
+                y_coord = sample_point_geometry.GetY()
+                sampled_depth = interp_fn(y_coord, x_coord)
+                sample_point.SetField('s_depth', float(sampled_depth))
+                sample_points_layer.SetFeature(sample_point)
+                LOGGER.debug("%s, %s, %s", y_coord, x_coord, sampled_depth)
+            sample_points_layer.SyncToDisk()
+            sample_points_layer = None
+            sample_points_vector = None
     # GENERATE SHORELINE PIXELS
     # FOR EACH POINT:
     #   FIND NEAREST SHORELINE POINT
@@ -272,9 +297,6 @@ def execute(args):
     #       CALCULATE COORDINATE
     #       SAMPLE RASTER UNDERNEATH
     #       SAMPLE HABITAT LAYER UNDERNEATH
-    sample_points_layer.SyncToDisk()
-    sample_points_layer = None
-    sample_points_vector = None
 
 
 def _make_shore_kernel(kernel_path):
