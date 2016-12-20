@@ -285,20 +285,40 @@ def execute(args):
                 args['workspace_dir'], 'profile_table_%s.csv' % point_name)
 
             with open(f_reg['profile_table'][point_name], 'w') as profile_table:
-                profile_table.write('distance (m),depth (m)\n')
+                profile_table.write('distance (m),depth (m)')
+                habitat_name_list = []
+                habitat_geometry_name_list = []
+                for path_name_pair in args['habitat_vector_path_list']:
+                    habitat_vector = ogr.Open(path_name_pair[0])
+                    for habitat_layer in habitat_vector:
+                        for habitat_feature in habitat_layer:
+                            habitat_name = habitat_feature.GetField(
+                                path_name_pair[1])
+                            if habitat_name not in habitat_name_list:
+                                habitat_name_list.append(habitat_name)
+                                profile_table.write(',%s' % habitat_name)
+                            habitat_geometry_name_list.append(
+                                (habitat_feature.GetGeometryRef().Clone(),
+                                 habitat_name))
+                    profile_table.write('\n')
+
                 for sample_point in sample_points_layer:
                     sample_point_geometry = sample_point.GetGeometryRef()
+                    habitat_crossing = [0] * len(habitat_name_list)
+                    for habitat_geometry, habitat_name in habitat_geometry_name_list:
+                        if habitat_geometry.Contains(sample_point_geometry):
+                            habitat_crossing[habitat_name_list.index(habitat_name)] = 1
                     x_coord = sample_point_geometry.GetX()
                     y_coord = sample_point_geometry.GetY()
                     step_distance = sample_point.GetField('s_dist')
                     sampled_depth = interp_fn(y_coord, x_coord)
                     profile_table.write(
-                        '%f,%f\n' % (step_distance, sampled_depth))
+                        '%f,%f' % (step_distance, sampled_depth))
+                    for crossing_value in habitat_crossing:
+                        profile_table.write(',%d' % crossing_value)
+                    profile_table.write('\n')
                     sample_point.SetField('s_depth', float(sampled_depth))
                     sample_points_layer.SetFeature(sample_point)
-                    LOGGER.debug(
-                        "%s, %s, %s, %s", y_coord, x_coord, sampled_depth,
-                        step_distance)
             sample_points_layer.SyncToDisk()
             sample_points_layer = None
             sample_points_vector = None
@@ -307,6 +327,7 @@ def execute(args):
     #   FIND NEAREST SHORELINE POINT
     #   CALCUALTE DIRECTION AS SHORE POINT TO SAMPLE POINT
     #   CREATE A LINE ROOTED AT SHORE PIXEL AS LONG AS REQUEST
+    #       OR PRINT AN ERROR IF THE PIXELS GO OUT OF BOUNDS ON THE BATHYMETRY
     #   WALK ALONG LINE FOR EACH STEP:
     #       CALCULATE COORDINATE
     #       SAMPLE RASTER UNDERNEATH
