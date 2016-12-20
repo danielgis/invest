@@ -173,6 +173,8 @@ def execute(args):
                 geom_type=ogr.wkbPoint)
             sample_points_layer.CreateField(
                 ogr.FieldDefn("s_depth", ogr.OFTReal))
+            sample_points_layer.CreateField(
+                ogr.FieldDefn("s_dist", ogr.OFTReal))
             sample_points_layer_defn = sample_points_layer.GetLayerDefn()
 
             representative_point_geometry = (
@@ -201,6 +203,7 @@ def execute(args):
                 sample_point_geometry.AddPoint(
                     sample_point_list[-1][0], sample_point_list[-1][1])
                 point_feature.SetGeometry(sample_point_geometry)
+                point_feature.SetField('s_dist', float(step))
                 sample_points_layer.CreateFeature(point_feature)
 
             sample_points_layer.SyncToDisk()
@@ -261,13 +264,11 @@ def execute(args):
             x_coordinates = (
                 bathymetry_gt[0] +
                 (x_coordinates + offset_dict['xoff']) * bathymetry_gt[1])
-
             y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
             # reverse the y coordinates so they are increasing
-            y_coordinates = (
+            y_coordinates = numpy.flipud(
                 bathymetry_gt[3] +
-                (y_coordinates + offset_dict['yoff']) * bathymetry_gt[5])[::-1]
-
+                (y_coordinates + offset_dict['yoff']) * bathymetry_gt[5])
             # reverse the rows in the array so they match y coordinates
             clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
 
@@ -277,14 +278,27 @@ def execute(args):
             interp_fn = scipy.interpolate.RectBivariateSpline(
                 y_coordinates, x_coordinates, clipped_bathymetry_array,
                 kx=1, ky=1)
-            for sample_point in sample_points_layer:
-                sample_point_geometry = sample_point.GetGeometryRef()
-                x_coord = sample_point_geometry.GetX()
-                y_coord = sample_point_geometry.GetY()
-                sampled_depth = interp_fn(y_coord, x_coord)
-                sample_point.SetField('s_depth', float(sampled_depth))
-                sample_points_layer.SetFeature(sample_point)
-                LOGGER.debug("%s, %s, %s", y_coord, x_coord, sampled_depth)
+
+            if 'profile_table' not in f_reg:
+                f_reg['profile_table'] = {}
+            f_reg['profile_table'][point_name] = os.path.join(
+                args['workspace_dir'], 'profile_table_%s.csv' % point_name)
+
+            with open(f_reg['profile_table'][point_name], 'w') as profile_table:
+                profile_table.write('distance (m),depth (m)\n')
+                for sample_point in sample_points_layer:
+                    sample_point_geometry = sample_point.GetGeometryRef()
+                    x_coord = sample_point_geometry.GetX()
+                    y_coord = sample_point_geometry.GetY()
+                    step_distance = sample_point.GetField('s_dist')
+                    sampled_depth = interp_fn(y_coord, x_coord)
+                    profile_table.write(
+                        '%f,%f\n' % (step_distance, sampled_depth))
+                    sample_point.SetField('s_depth', float(sampled_depth))
+                    sample_points_layer.SetFeature(sample_point)
+                    LOGGER.debug(
+                        "%s, %s, %s, %s", y_coord, x_coord, sampled_depth,
+                        step_distance)
             sample_points_layer.SyncToDisk()
             sample_points_layer = None
             sample_points_vector = None
