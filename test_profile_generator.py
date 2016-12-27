@@ -14,11 +14,12 @@ def main():
     args = {
         'workspace_dir': 'profile_generator_workspace',
         'results_suffix': 'test',
-        'bathymetry_path': r"claybark_dem",
+        'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
         'shore_height': 0.0,
         'representative_point_vector_path': r"representative_profile_points.shp",
         'step_size': 20,
-        'profile_length': 600,
+        'offshore_profile_length': 600,
+        'onshore_profile_length': 50,
         'habitat_vector_path_list': [
             (r"sample_claybark_hab_a.shp", 'name')],
     }

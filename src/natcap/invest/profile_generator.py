@@ -48,8 +48,10 @@ def execute(args):
             vector file that contains points from which to sample bathymetry.
         args['step_size'] (float): the number of linear units per step to
             sample the profile.
-        args['profile_length'] (float): the length of the profile from off
-            the shore in linear units.
+        args['offshore_profile_length'] (float): length of the profile
+            in the offshore direction linear units.
+        args['onshore_profile_length'] (float): length of profile in onshore
+            direction linear units.
         args['habitat_vector_path_list'] (list): List of paths to vector files
             that represent habitat layers.  The presence of overlap/no overlap
             will be included in the profile results.
@@ -191,19 +193,26 @@ def execute(args):
                 (representative_point[0]-closest_point[0]) / vector_length)
             y_size = (
                 (representative_point[1]-closest_point[1]) / vector_length)
+            starting_point = (
+                closest_point[0] - x_size * args['onshore_profile_length'],
+                closest_point[1] - y_size * args['onshore_profile_length'])
             LOGGER.debug("%s, %s", x_size, y_size)
             sample_point_list = []
             for step in numpy.arange(
-                    0, args['profile_length'], args['step_size']):
+                    0, args['onshore_profile_length'] +
+                    args['offshore_profile_length'], args['step_size']):
                 point_feature = ogr.Feature(sample_points_layer_defn)
                 sample_point_geometry = ogr.Geometry(ogr.wkbPoint)
                 sample_point_list.append(
-                    (closest_point[0] + x_size * step,
-                     closest_point[1] + y_size * step))
+                    (starting_point[0] + x_size * step,
+                     starting_point[1] + y_size * step))
                 sample_point_geometry.AddPoint(
                     sample_point_list[-1][0], sample_point_list[-1][1])
                 point_feature.SetGeometry(sample_point_geometry)
-                point_feature.SetField('s_dist', float(step))
+                # make sure we account for step size going negative when we're
+                # on land
+                point_feature.SetField('s_dist', float(
+                    step-args['onshore_profile_length']))
                 sample_points_layer.CreateFeature(point_feature)
 
             sample_points_layer.SyncToDisk()
@@ -223,7 +232,7 @@ def execute(args):
             line_feature = ogr.Feature(profile_lines_layer_defn)
             profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
             profile_line_geometry.AddPoint(
-                closest_point[0], closest_point[1])
+                starting_point[0], starting_point[1])
             profile_line_geometry.AddPoint(
                 sample_point_list[-1][0], sample_point_list[-1][1])
             line_feature.SetGeometry(profile_line_geometry)
