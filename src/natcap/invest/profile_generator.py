@@ -238,19 +238,35 @@ def execute(args):
             line_feature.SetGeometry(profile_line_geometry)
             profile_lines_layer.CreateFeature(line_feature)
             profile_lines_layer.SyncToDisk()
+            #extent is xmin, xmax, ymin, ymax
             extent = profile_lines_layer.GetExtent()
             # convert extent to bathymetry index extent
             bathymetry_gt = pygeoprocessing.get_geotransform_uri(
                 args['bathymetry_path'])
 
+            # always want to round up on the max and round down on the min
             # reverse last two because y coord moves up while pixels move down
             extent_in_pixel_coords = (
-                int((extent[0] - bathymetry_gt[0]) / bathymetry_gt[1]),
-                int((extent[1] - bathymetry_gt[0]) / bathymetry_gt[1]),
-                int(round(0.5+(extent[3] - bathymetry_gt[3]) /
-                          bathymetry_gt[5])),
+                int((extent[0] - bathymetry_gt[0]) / bathymetry_gt[1]) - 1,
+                int(round(0.5 + (extent[1] - bathymetry_gt[0]) /
+                          bathymetry_gt[1])) + 1,
+                int(((extent[3] - bathymetry_gt[3]) /
+                     bathymetry_gt[5])) - 1,
                 int(round(0.5+(extent[2] - bathymetry_gt[3]) /
-                          bathymetry_gt[5])))
+                          bathymetry_gt[5])) + 1)
+
+            bounding_box_point = ogr.Geometry(ogr.wkbLineString)
+            bounding_box_point.AddPoint(
+                extent[0], extent[2])
+            bounding_box_point.AddPoint(
+                extent[0], extent[3])
+            bounding_box_point.AddPoint(
+                extent[1], extent[3])
+            bounding_box_point.AddPoint(
+                extent[1], extent[2])
+            line_feature.SetGeometry(bounding_box_point)
+            profile_lines_layer.CreateFeature(line_feature)
+
             offset_dict = {
                 'xoff': extent_in_pixel_coords[0],
                 'yoff': extent_in_pixel_coords[2],
@@ -268,16 +284,15 @@ def execute(args):
 
             clipped_bathymetry_array = bathymetry_band.ReadAsArray(
                 **offset_dict)
-
             x_coordinates = numpy.arange(clipped_bathymetry_array.shape[1])
             x_coordinates = (
-                bathymetry_gt[0] +
-                (x_coordinates + offset_dict['xoff']) * bathymetry_gt[1])
+                bathymetry_gt[0] + (
+                    x_coordinates + offset_dict['xoff'] + 0.5) * bathymetry_gt[1])
             y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
             # reverse the y coordinates so they are increasing
             y_coordinates = numpy.flipud(
-                bathymetry_gt[3] +
-                (y_coordinates + offset_dict['yoff']) * bathymetry_gt[5])
+                bathymetry_gt[3] + (
+                    y_coordinates + offset_dict['yoff'] + 0.5) * bathymetry_gt[5])
             # reverse the rows in the array so they match y coordinates
             clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
 
