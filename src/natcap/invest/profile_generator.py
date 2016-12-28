@@ -73,6 +73,8 @@ def execute(args):
 
     bathymetry_nodata = pygeoprocessing.get_nodata_from_uri(
         args['bathymetry_path'])
+    bathy_rows, bathy_cols = pygeoprocessing.get_row_col_from_uri(
+        args['bathymetry_path'])
 
     def _land_mask_op(bathymetry):
         """Mask values >= shore height."""
@@ -196,7 +198,6 @@ def execute(args):
             starting_point = (
                 closest_point[0] - x_size * args['onshore_profile_length'],
                 closest_point[1] - y_size * args['onshore_profile_length'])
-            LOGGER.debug("%s, %s", x_size, y_size)
             sample_point_list = []
             for step in numpy.arange(
                     0, args['onshore_profile_length'] +
@@ -275,10 +276,26 @@ def execute(args):
                 'win_ysize': (
                     extent_in_pixel_coords[3]-extent_in_pixel_coords[2]),
             }
-            LOGGER.debug(bathymetry_gt)
-            LOGGER.debug(extent)
-            LOGGER.debug(extent_in_pixel_coords)
-            LOGGER.debug(offset_dict)
+            for offset, winsize in [
+                    ('xoff', 'win_xsize'), ('yoff', 'win_ysize')]:
+                if offset_dict[offset] < 0:
+                    # this works because offset will be negative
+                    offset_dict[winsize] += offset_dict[offset]
+                    LOGGER.error(
+                        "Profile sample outside of bathymetry raster, results "
+                        "will be clipped to edge.")
+                    offset_dict[offset] = 0
+            # now check if window is too large
+            for offset, winsize, rastersize in [
+                    ('xoff', 'win_xsize', bathy_cols),
+                    ('yoff', 'win_ysize', bathy_rows)]:
+                if offset_dict[offset] + offset_dict[winsize] >= rastersize:
+                    # this works because offset will be negative
+                    offset_dict[winsize] = rastersize - offset_dict[offset]
+                    LOGGER.error(
+                        "Profile sample outside of bathymetry raster, results "
+                        "will be clipped to edge.")
+
             profile_lines_layer = None
             profile_lines_vector = None
 
@@ -296,9 +313,6 @@ def execute(args):
             # reverse the rows in the array so they match y coordinates
             clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
 
-            LOGGER.debug(
-                "%s, %s, %s", x_coordinates.shape, y_coordinates.shape,
-                clipped_bathymetry_array.shape)
             interp_fn = scipy.interpolate.RectBivariateSpline(
                 y_coordinates, x_coordinates, clipped_bathymetry_array,
                 kx=1, ky=1)
