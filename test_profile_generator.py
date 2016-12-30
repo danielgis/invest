@@ -14,7 +14,8 @@ def main():
     args = {
         'workspace_dir': 'profile_generator_workspace',
         'results_suffix': 'adaptive_steps',
-        'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
+        #'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
+        'bathymetry_path': r"C:\Users\rpsharp\Documents\bitbucket_repos\invest\data\invest-data\Base_Data\Marine\DEMs\claybark_dem",
         'shore_height': 0.0,  # shore elevation on bathy layer
         'representative_point_vector_path': r"C:\Users\rpsharp\Dropbox\shared_with_users\profile_data_for_jess\representative_profile_points.shp",
         # stepsize is (close distance step, max close distance)

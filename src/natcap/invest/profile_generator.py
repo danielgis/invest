@@ -201,7 +201,7 @@ def execute(args):
 
             # construct step distances away from shore
             offshore_steps = []
-            onshore_steps = []
+            onshore_steps = [0.0]
             current_distance = 0.0
             near_dist = args['step_size'][0][1]
             far_dist = args['step_size'][1][1]
