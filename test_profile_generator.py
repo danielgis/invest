@@ -16,11 +16,11 @@ def main():
         'results_suffix': 'adaptive_steps',
         'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
         'shore_height': 0.0,  # shore elevation on bathy layer
-        'representative_point_vector_path': r"representative_profile_points.shp",
+        'representative_point_vector_path': r"C:\Users\rpsharp\Dropbox\shared_with_users\profile_data_for_jess\representative_profile_points.shp",
         # stepsize is (close distance step, max close distance)
         # stepsize is (far distance step, far distance definition)
-        'step_size': ((20, 500), (100, 2000)),
-        'smoothing_sigma': 40.0,  # sigma of gaussian filter of bathy layer
+        'step_size': ((10, 500), (100, 2000)),
+        'smoothing_sigma': 0.0,  # sigma of gaussian filter of bathy layer
         'offshore_profile_length': 2000,
         'onshore_profile_length': 500,
         'habitat_vector_path_list': [
