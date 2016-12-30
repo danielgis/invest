@@ -186,20 +186,17 @@ def execute(args):
             representative_point_geometry = (
                 representative_point.GetGeometryRef())
             representative_point = representative_point_geometry.GetPoint(0)
-            closest_point = shore_point_index.nearest(
+            shore_point = shore_point_index.nearest(
                 (representative_point[0], representative_point[1]),
                 objects=True).next().object
 
             vector_length = (
-                (representative_point[0]-closest_point[0]) ** 2 +
-                (representative_point[1]-closest_point[1]) ** 2) ** 0.5
+                (representative_point[0]-shore_point[0]) ** 2 +
+                (representative_point[1]-shore_point[1]) ** 2) ** 0.5
             x_size = (
-                (representative_point[0]-closest_point[0]) / vector_length)
+                (representative_point[0]-shore_point[0]) / vector_length)
             y_size = (
-                (representative_point[1]-closest_point[1]) / vector_length)
-            starting_point = (
-                closest_point[0] - x_size * args['onshore_profile_length'],
-                closest_point[1] - y_size * args['onshore_profile_length'])
+                (representative_point[1]-shore_point[1]) / vector_length)
             sample_point_list = []
 
             # construct step distances away from shore
@@ -210,7 +207,18 @@ def execute(args):
             far_dist = args['step_size'][1][1]
             near_stepsize = args['step_size'][0][0]
             far_stepsize = args['step_size'][1][0]
+            current_step = near_stepsize
             while True:
+                out_of_range = True
+                current_distance += current_step
+                if current_distance <= args['offshore_profile_length']:
+                    offshore_steps.append(current_distance)
+                    out_of_range = False
+                if current_distance <= args['onshore_profile_length']:
+                    onshore_steps.append(-current_distance)
+                    out_of_range = False
+                if out_of_range:
+                    break
                 if current_distance <= near_dist:
                     current_step = near_stepsize
                 elif current_distance >= far_dist:
@@ -221,17 +229,6 @@ def execute(args):
                         near_dist - far_dist)
                     current_step = (
                         t_pos * near_stepsize + (1 - t_pos) * far_stepsize)
-                out_of_range = True
-                current_distance += current_step
-                LOGGER.debug("%s, %s", current_distance, current_step)
-                if current_distance <= args['offshore_profile_length']:
-                    offshore_steps.append(current_distance)
-                    out_of_range = False
-                if current_distance <= args['onshore_profile_length']:
-                    onshore_steps.append(-current_distance)
-                    out_of_range = False
-                if out_of_range:
-                    break
             # work from offshore inward
             onshore_steps.reverse()
 
@@ -239,8 +236,8 @@ def execute(args):
                 point_feature = ogr.Feature(sample_points_layer_defn)
                 sample_point_geometry = ogr.Geometry(ogr.wkbPoint)
                 sample_point_list.append(
-                    (starting_point[0] + x_size * step,
-                     starting_point[1] + y_size * step))
+                    (shore_point[0] + x_size * step,
+                     shore_point[1] + y_size * step))
                 sample_point_geometry.AddPoint(
                     sample_point_list[-1][0], sample_point_list[-1][1])
                 point_feature.SetGeometry(sample_point_geometry)
@@ -267,7 +264,7 @@ def execute(args):
             line_feature = ogr.Feature(profile_lines_layer_defn)
             profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
             profile_line_geometry.AddPoint(
-                starting_point[0], starting_point[1])
+                sample_point_list[0][0], sample_point_list[0][1])
             profile_line_geometry.AddPoint(
                 sample_point_list[-1][0], sample_point_list[-1][1])
             line_feature.SetGeometry(profile_line_geometry)
