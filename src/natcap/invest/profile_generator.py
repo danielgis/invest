@@ -2,6 +2,7 @@
 import os
 import logging
 
+import scipy.ndimage.filters
 import scipy.interpolate
 from osgeo import gdal
 from osgeo import osr
@@ -166,7 +167,8 @@ def execute(args):
                 f_reg['sample_points'] = {}
 
             f_reg['sample_points'][point_name] = os.path.join(
-                args['workspace_dir'], 'sample_points_%s.shp' % point_name)
+                args['workspace_dir'], 'sample_points_%s_%s.shp' % (
+                    point_name, args['results_suffix']))
             if os.path.exists(f_reg['sample_points'][point_name]):
                 os.remove(f_reg['sample_points'][point_name])
             sample_points_vector = esri_driver.CreateDataSource(
@@ -220,7 +222,8 @@ def execute(args):
             if 'profile_lines' not in f_reg:
                 f_reg['profile_lines'] = {}
             f_reg['profile_lines'][point_name] = os.path.join(
-                args['workspace_dir'], 'profile_line_%s.shp' % point_name)
+                args['workspace_dir'], 'profile_line_%s_%s.shp' % (
+                    args['results_suffix'], point_name))
             if os.path.exists(f_reg['profile_lines'][point_name]):
                 os.remove(f_reg['profile_lines'][point_name])
             profile_lines_vector = esri_driver.CreateDataSource(
@@ -301,26 +304,30 @@ def execute(args):
 
             clipped_bathymetry_array = bathymetry_band.ReadAsArray(
                 **offset_dict)
-            x_coordinates = numpy.arange(clipped_bathymetry_array.shape[1])
+            smoothed_bathymetry_array = scipy.ndimage.filters.gaussian_filter(
+                clipped_bathymetry_array, args['smoothing_sigma'] / float(
+                    bathymetry_pixel_size))
+            x_coordinates = numpy.arange(smoothed_bathymetry_array.shape[1])
             x_coordinates = (
                 bathymetry_gt[0] + (
                     x_coordinates + offset_dict['xoff'] + 0.5) * bathymetry_gt[1])
-            y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
+            y_coordinates = numpy.arange(smoothed_bathymetry_array.shape[0])
             # reverse the y coordinates so they are increasing
             y_coordinates = numpy.flipud(
                 bathymetry_gt[3] + (
                     y_coordinates + offset_dict['yoff'] + 0.5) * bathymetry_gt[5])
             # reverse the rows in the array so they match y coordinates
-            clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
+            smoothed_bathymetry_array = numpy.flipud(smoothed_bathymetry_array)
 
             interp_fn = scipy.interpolate.RectBivariateSpline(
-                y_coordinates, x_coordinates, clipped_bathymetry_array,
+                y_coordinates, x_coordinates, smoothed_bathymetry_array,
                 kx=1, ky=1)
 
             if 'profile_table' not in f_reg:
                 f_reg['profile_table'] = {}
             f_reg['profile_table'][point_name] = os.path.join(
-                args['workspace_dir'], 'profile_table_%s.csv' % point_name)
+                args['workspace_dir'], 'profile_table_%s_%s.csv' % (
+                    point_name, args['results_suffix']))
 
             with open(f_reg['profile_table'][point_name], 'w') as profile_table:
                 profile_table.write('distance (m),depth (m)')
