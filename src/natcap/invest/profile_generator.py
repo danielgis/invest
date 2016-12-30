@@ -201,9 +201,41 @@ def execute(args):
                 closest_point[0] - x_size * args['onshore_profile_length'],
                 closest_point[1] - y_size * args['onshore_profile_length'])
             sample_point_list = []
-            for step in numpy.arange(
-                    0, args['onshore_profile_length'] +
-                    args['offshore_profile_length'], args['step_size']):
+
+            # construct step distances away from shore
+            offshore_steps = []
+            onshore_steps = []
+            current_distance = 0.0
+            near_dist = args['step_size'][0][1]
+            far_dist = args['step_size'][1][1]
+            near_stepsize = args['step_size'][0][0]
+            far_stepsize = args['step_size'][1][0]
+            while True:
+                if current_distance <= near_dist:
+                    current_step = near_stepsize
+                elif current_distance >= far_dist:
+                    current_step = far_stepsize
+                else:
+                    # bargain basement linear interpolation
+                    t_pos = (current_distance - far_dist) / (
+                        near_dist - far_dist)
+                    current_step = (
+                        t_pos * near_stepsize + (1 - t_pos) * far_stepsize)
+                out_of_range = True
+                current_distance += current_step
+                LOGGER.debug("%s, %s", current_distance, current_step)
+                if current_distance <= args['offshore_profile_length']:
+                    offshore_steps.append(current_distance)
+                    out_of_range = False
+                if current_distance <= args['onshore_profile_length']:
+                    onshore_steps.append(-current_distance)
+                    out_of_range = False
+                if out_of_range:
+                    break
+            # work from offshore inward
+            onshore_steps.reverse()
+
+            for step in onshore_steps + offshore_steps:
                 point_feature = ogr.Feature(sample_points_layer_defn)
                 sample_point_geometry = ogr.Geometry(ogr.wkbPoint)
                 sample_point_list.append(
@@ -214,8 +246,7 @@ def execute(args):
                 point_feature.SetGeometry(sample_point_geometry)
                 # make sure we account for step size going negative when we're
                 # on land
-                point_feature.SetField('s_dist', float(
-                    step-args['onshore_profile_length']))
+                point_feature.SetField('s_dist', step)
                 sample_points_layer.CreateFeature(point_feature)
 
             sample_points_layer.SyncToDisk()
