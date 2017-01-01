@@ -1,4 +1,4 @@
-"""Profile generator test."""
+"""Profile generator sample."""
 import logging
 
 import natcap.invest.profile_generator
@@ -13,10 +13,8 @@ def main():
     """Entry point."""
     args = {
         'workspace_dir': 'profile_generator_workspace',
-        'results_suffix': 'adaptive_steps',
-        #'bathymetry_path': r"C:\Users\rpsharp\Documents\clipped_claybark.tif",
+        'results_suffix': 'mysuffix',
         'bathymetry_path': r"clipped_claybark_dem.tif",
-        #'bathymetry_path': r"E:\repositories\bitbucket_repos\invest\data\invest-data\Base_Data\Marine\DEMs\claybark_dem",
         'shore_height': 0.0,  # shore elevation on bathy layer
         'representative_point_vector_path': r"D:\Dropbox\shared_with_users\profile_data_for_jess\representative_profile_points.shp",
         # stepsize is (close distance step, max close distance)
@@ -25,6 +23,7 @@ def main():
         'smoothing_sigma': 0.0,  # sigma of gaussian filter of bathy layer
         'offshore_profile_length': 2000,
         'onshore_profile_length': 500,
+        # list of tuples of the form: (shapefile path, habitat name field)
         'habitat_vector_path_list': [
             (r"D:\Dropbox\shared_with_users\profile_data_for_jess\sample_claybark_hab_a.shp", 'name')],
     }
