@@ -2,6 +2,7 @@
 import os
 import logging
 
+import scipy.signal
 import scipy.ndimage.filters
 import scipy.interpolate
 from osgeo import gdal
@@ -180,6 +181,8 @@ def execute(args):
             sample_points_layer.CreateField(
                 ogr.FieldDefn("s_depth", ogr.OFTReal))
             sample_points_layer.CreateField(
+                ogr.FieldDefn("i_depth", ogr.OFTReal))
+            sample_points_layer.CreateField(
                 ogr.FieldDefn("s_dist", ogr.OFTReal))
             sample_points_layer_defn = sample_points_layer.GetLayerDefn()
 
@@ -332,24 +335,41 @@ def execute(args):
 
             clipped_bathymetry_array = bathymetry_band.ReadAsArray(
                 **offset_dict)
-            smoothed_bathymetry_array = scipy.ndimage.filters.gaussian_filter(
-                clipped_bathymetry_array, args['smoothing_sigma'] / float(
-                    bathymetry_pixel_size))
-            x_coordinates = numpy.arange(smoothed_bathymetry_array.shape[1])
+            x_coordinates = numpy.arange(clipped_bathymetry_array.shape[1])
             x_coordinates = (
                 bathymetry_gt[0] + (
                     x_coordinates + offset_dict['xoff'] + 0.5) * bathymetry_gt[1])
-            y_coordinates = numpy.arange(smoothed_bathymetry_array.shape[0])
+            y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
             # reverse the y coordinates so they are increasing
             y_coordinates = numpy.flipud(
                 bathymetry_gt[3] + (
                     y_coordinates + offset_dict['yoff'] + 0.5) * bathymetry_gt[5])
             # reverse the rows in the array so they match y coordinates
-            smoothed_bathymetry_array = numpy.flipud(smoothed_bathymetry_array)
+            clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
 
             interp_fn = scipy.interpolate.RectBivariateSpline(
-                y_coordinates, x_coordinates, smoothed_bathymetry_array,
+                y_coordinates, x_coordinates, clipped_bathymetry_array,
                 kx=1, ky=1)
+
+            sampled_depth_array = []
+            distance_array = []
+            for sample_point in sample_points_layer:
+                sample_point_geometry = sample_point.GetGeometryRef()
+                x_coord = sample_point_geometry.GetX()
+                y_coord = sample_point_geometry.GetY()
+                step_distance = sample_point.GetField('s_dist')
+                distance_array.append(step_distance)
+                sampled_depth = interp_fn(y_coord, x_coord)
+                sampled_depth_array.append(sampled_depth[0][0])
+                sample_point.SetField('s_depth', float(sampled_depth_array[-1]))
+                sample_points_layer.SetFeature(sample_point)
+            sample_points_layer.ResetReading()
+            #smoothed_depth_array = numpy.array(sampled_depth_array)
+            sampled_depth_array = numpy.array(sampled_depth_array)
+            LOGGER.debug(sampled_depth_array.shape)
+            smoothed_depth_array = scipy.signal.savgol_filter(
+                sampled_depth_array,
+                (sampled_depth_array.size/4) * 2 - 1, 2)
 
             if 'profile_table' not in f_reg:
                 f_reg['profile_table'] = {}
@@ -358,7 +378,7 @@ def execute(args):
                     point_name, args['results_suffix']))
 
             with open(f_reg['profile_table'][point_name], 'w') as profile_table:
-                profile_table.write('distance (m),depth (m)')
+                profile_table.write('distance (m),depth (m),smoothed depth (m)')
                 habitat_name_list = []
                 habitat_geometry_name_list = []
                 for path_name_pair in args['habitat_vector_path_list']:
@@ -374,23 +394,24 @@ def execute(args):
                                 (habitat_feature.GetGeometryRef().Clone(),
                                  habitat_name))
                     profile_table.write('\n')
+                for sample_point, samp_depth, smooth_depth, dist in zip(
+                        sample_points_layer, sampled_depth_array,
+                        smoothed_depth_array, distance_array):
 
-                for sample_point in sample_points_layer:
-                    sample_point_geometry = sample_point.GetGeometryRef()
                     habitat_crossing = [0] * len(habitat_name_list)
+                    sample_point_geometry = sample_point.GetGeometryRef()
                     for habitat_geometry, habitat_name in habitat_geometry_name_list:
                         if habitat_geometry.Contains(sample_point_geometry):
                             habitat_crossing[habitat_name_list.index(habitat_name)] = 1
+
                     x_coord = sample_point_geometry.GetX()
                     y_coord = sample_point_geometry.GetY()
-                    step_distance = sample_point.GetField('s_dist')
-                    sampled_depth = interp_fn(y_coord, x_coord)
                     profile_table.write(
-                        '%f,%f' % (step_distance, sampled_depth))
+                        '%f,%f,%f' % (dist, samp_depth, smooth_depth))
                     for crossing_value in habitat_crossing:
                         profile_table.write(',%d' % crossing_value)
                     profile_table.write('\n')
-                    sample_point.SetField('s_depth', float(sampled_depth))
+                    sample_point.SetField('i_depth', float(smooth_depth))
                     sample_points_layer.SetFeature(sample_point)
             sample_points_layer.SyncToDisk()
             sample_points_layer = None
