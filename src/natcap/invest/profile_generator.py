@@ -11,6 +11,8 @@ from osgeo import ogr
 import numpy
 import rtree
 import pygeoprocessing
+import shapely.wkb
+import shapely.prepared
 
 from . import utils
 
@@ -376,12 +378,12 @@ def execute(args):
                 distance_array.append(step_distance)
                 sampled_depth = interp_fn(y_coord, x_coord)
                 sampled_depth_array.append(sampled_depth[0][0])
-                sample_point.SetField('s_depth', float(sampled_depth_array[-1]))
+                sample_point.SetField(
+                    's_depth', float(sampled_depth_array[-1]))
                 sample_points_layer.SetFeature(sample_point)
             sample_points_layer.ResetReading()
             #smoothed_depth_array = numpy.array(sampled_depth_array)
             sampled_depth_array = numpy.array(sampled_depth_array)
-            LOGGER.debug(sampled_depth_array.shape)
             smoothed_depth_array = scipy.signal.savgol_filter(
                 sampled_depth_array,
                 (sampled_depth_array.size/4) * 2 - 1, 2)
@@ -398,16 +400,38 @@ def execute(args):
                 habitat_geometry_name_list = []
                 for path_name_pair in args['habitat_vector_path_list']:
                     habitat_vector = ogr.Open(path_name_pair[0])
-                    for habitat_layer in habitat_vector:
-                        for habitat_feature in habitat_layer:
+                    LOGGER.info("Parsing habitat layer %s", path_name_pair[0])
+                    n_layers = habitat_vector.GetLayerCount()
+                    for layer_index, habitat_layer in enumerate(
+                            habitat_vector):
+                        LOGGER.info(
+                            "Working on habitat layer %d of %d in %s",
+                            layer_index+1, n_layers, path_name_pair[0])
+                        n_features = habitat_layer.GetFeatureCount()
+                        for feature_index, habitat_feature in enumerate(
+                                habitat_layer):
+                            LOGGER.info(
+                                "Analyzing feature %d of %d", feature_index+1,
+                                n_features)
+                            habitat_feature_geom = (
+                                habitat_feature.GetGeometryRef())
+                            # sometimes there's a feature, but no geometry
+                            # it's a valid shapefile still.
+                            if habitat_feature_geom is None:
+                                continue
                             habitat_name = habitat_feature.GetField(
                                 path_name_pair[1])
                             if habitat_name not in habitat_name_list:
                                 habitat_name_list.append(habitat_name)
                                 profile_table.write(',%s' % habitat_name)
+
+                            shapely_geom = shapely.wkb.loads(
+                                habitat_feature_geom.ExportToWkb())
+                            preped_shapely_geom = (
+                                shapely.prepared.prep(shapely_geom))
+
                             habitat_geometry_name_list.append(
-                                (habitat_feature.GetGeometryRef().Clone(),
-                                 habitat_name))
+                                (preped_shapely_geom, habitat_name))
                 profile_table.write('\n')
                 for sample_point, samp_depth, smooth_depth, dist in zip(
                         sample_points_layer, sampled_depth_array,
@@ -416,7 +440,9 @@ def execute(args):
                     habitat_crossing = [0] * len(habitat_name_list)
                     sample_point_geometry = sample_point.GetGeometryRef()
                     for habitat_geometry, habitat_name in habitat_geometry_name_list:
-                        if habitat_geometry.Contains(sample_point_geometry):
+                        shapely_point = shapely.wkb.loads(
+                            sample_point_geometry.ExportToWkb())
+                        if habitat_geometry.contains(shapely_point):
                             habitat_crossing[habitat_name_list.index(habitat_name)] = 1
 
                     x_coord = sample_point_geometry.GetX()
