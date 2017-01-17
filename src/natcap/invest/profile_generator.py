@@ -271,7 +271,7 @@ def execute(args):
             if 'profile_lines' not in f_reg:
                 f_reg['profile_lines'] = {}
             f_reg['profile_lines'][point_name] = os.path.join(
-                args['workspace_dir'], 'profile_line_%s_%s.shp' % (
+                intermediate_output_dir, 'profile_line_%s_%s.shp' % (
                     args['results_suffix'], point_name))
             if os.path.exists(f_reg['profile_lines'][point_name]):
                 os.remove(f_reg['profile_lines'][point_name])
@@ -291,7 +291,7 @@ def execute(args):
             line_feature.SetGeometry(profile_line_geometry)
             profile_lines_layer.CreateFeature(line_feature)
             profile_lines_layer.SyncToDisk()
-            #extent is xmin, xmax, ymin, ymax
+            # extent is xmin, xmax, ymin, ymax
             extent = profile_lines_layer.GetExtent()
 
             # always want to round up on the max and round down on the min
