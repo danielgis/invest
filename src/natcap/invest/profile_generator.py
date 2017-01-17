@@ -202,6 +202,24 @@ def execute(args):
                 (representative_point[1]-shore_point[1]) / vector_length)
             sample_point_list = []
 
+            # test if represenative point is on land or water
+            bathymetry_gt = pygeoprocessing.get_geotransform_uri(
+                args['bathymetry_path'])
+            representative_point_coords = (
+                int((representative_point[0] - bathymetry_gt[0]) /
+                    bathymetry_gt[1]),
+                int((representative_point[1] - bathymetry_gt[3]) /
+                    bathymetry_gt[5]))
+
+            # check if representative point is on land, if so; flip direction
+            representative_point_elevation = bathymetry_band.ReadAsArray(
+                xoff=representative_point_coords[0],
+                yoff=representative_point_coords[1],
+                win_xsize=1, win_ysize=1)
+            if representative_point_elevation >= args['shore_height']:
+                x_size *= -1
+                y_size *= -1
+
             # construct step distances away from shore
             offshore_steps = []
             onshore_steps = [0.0]
@@ -275,9 +293,6 @@ def execute(args):
             profile_lines_layer.SyncToDisk()
             #extent is xmin, xmax, ymin, ymax
             extent = profile_lines_layer.GetExtent()
-            # convert extent to bathymetry index extent
-            bathymetry_gt = pygeoprocessing.get_geotransform_uri(
-                args['bathymetry_path'])
 
             # always want to round up on the max and round down on the min
             # reverse last two because y coord moves up while pixels move down
@@ -393,7 +408,7 @@ def execute(args):
                             habitat_geometry_name_list.append(
                                 (habitat_feature.GetGeometryRef().Clone(),
                                  habitat_name))
-                    profile_table.write('\n')
+                profile_table.write('\n')
                 for sample_point, samp_depth, smooth_depth, dist in zip(
                         sample_points_layer, sampled_depth_array,
                         smoothed_depth_array, distance_array):
