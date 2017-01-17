@@ -12,7 +12,7 @@ LOGGER = logging.getLogger('test_profile_generator')
 def main():
     """Entry point."""
     args = {
-        'workspace_dir': 'delete_profile_generator_workspace_jess_debug',
+        'workspace_dir': 'delete_profile_generator_workspace_jess_debug_w_hab',
         'results_suffix': 'mysuffix',
         'bathymetry_path': r"E:\Dropbox\jess_profile_debug_data\profile_data_for_jess\Andros_dem.tif",
         'shore_height': 0.0,  # shore elevation on bathy layer
@@ -24,7 +24,9 @@ def main():
         'offshore_profile_length': 2000,
         'onshore_profile_length': 500,
         # list of tuples of the form: (shapefile path, habitat name field)
-        'habitat_vector_path_list': [],
+        'habitat_vector_path_list': [
+            (r"E:\Dropbox\jess_profile_debug_data\profile_data_for_jess\Andros_habitat_clipped.shp",
+             'name')],
     }
     natcap.invest.profile_generator.execute(args)
 
