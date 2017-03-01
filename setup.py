@@ -170,11 +170,8 @@ def requirements(*pkgnames):
                           'requirements for %s') % list(missing_pkgs))
     return found_pkgnames.values()
 
-
-#BUILD_REQUIREMENTS = ['cython', 'numpy'] + requirements('pygeoprocessing',
-#                                                        'natcap.versioner')
-BUILD_REQUIREMENTS = ['cython', 'numpy'] + requirements('natcap.versioner')
-
+BUILD_REQUIREMENTS = ['cython', 'numpy'] + requirements('pygeoprocessing',
+                                                        'natcap.versioner')
 
 setup(
     name='natcap.invest',
@@ -200,7 +197,6 @@ setup(
         'natcap.invest.marine_water_quality',
         'natcap.invest.ndr',
         'natcap.invest.overlap_analysis',
-        'natcap.invest.pollination',
         'natcap.invest.recreation',
         'natcap.invest.reporting',
         'natcap.invest.routing',

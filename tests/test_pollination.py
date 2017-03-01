@@ -4,14 +4,11 @@ import tempfile
 import shutil
 import os
 
-import natcap.invest.pygeoprocessing_0_3_3.testing
-from natcap.invest.pygeoprocessing_0_3_3.testing import scm
+import pygeoprocessing.testing
+from pygeoprocessing.testing import scm
 
 SAMPLE_DATA = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'invest-data')
-REGRESSION_DATA = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'invest-test-data',
-    'pollination')
+    os.path.dirname(__file__), '..', 'data', 'invest-data', 'pollination_20')
 
 
 class PollinationTests(unittest.TestCase):
@@ -28,43 +25,19 @@ class PollinationTests(unittest.TestCase):
         shutil.rmtree(self.workspace_dir)
 
     @scm.skip_if_data_missing(SAMPLE_DATA)
-    @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_pollination_regression(self):
         """Pollination: regression testing sample data."""
-        from natcap.invest.pollination import pollination
-
+        from natcap.invest import pollination
         args = {
-            'ag_classes': (
-                '67 68 71 72 73 74 75 76 78 79 80 81 82 83 84 85 88 90 91 92'),
-            'do_valuation': True,
-            'guilds_uri': os.path.join(
-                SAMPLE_DATA, 'Pollination', 'Input', 'Guild.csv'),
-            'half_saturation': 0.125,
-            'landuse_attributes_uri': os.path.join(
-                SAMPLE_DATA, 'Pollination', 'Input', 'LU.csv'),
-            'landuse_cur_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Terrestrial', 'lulc_samp_cur'),
-            'landuse_fut_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Terrestrial', 'lulc_samp_fut'),
             'results_suffix': u'',
-            'wild_pollination_proportion': 1.0,
-            'workspace_dir': self.workspace_dir,
+            'workspace_dir': 'test_pollination',
+            'landcover_raster_path': os.path.join(
+                SAMPLE_DATA, 'landcover.tif'),
+            'guild_table_path': os.path.join(SAMPLE_DATA, 'guild_table.csv'),
+            'landcover_biophysical_table_path': os.path.join(
+                SAMPLE_DATA, r'habitat_nesting_suitability.csv'),
         }
-
         pollination.execute(args)
-
-        PollinationTests._test_same_files(
-            os.path.join(
-                REGRESSION_DATA, 'expected_file_list_regression.txt'),
-            args['workspace_dir'])
-
-        natcap.invest.pygeoprocessing_0_3_3.testing.assert_rasters_equal(
-            os.path.join(self.workspace_dir, 'output', 'frm_avg_cur.tif'),
-            os.path.join(REGRESSION_DATA, 'frm_avg_cur_regression.tif'), 1e-6)
-
-        natcap.invest.pygeoprocessing_0_3_3.testing.assert_rasters_equal(
-            os.path.join(self.workspace_dir, 'output', 'frm_avg_fut.tif'),
-            os.path.join(REGRESSION_DATA, 'frm_avg_fut_regression.tif'), 1e-6)
 
     @staticmethod
     def _test_same_files(base_list_path, directory_path):
