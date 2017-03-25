@@ -644,6 +644,7 @@ REPOS_DICT = {
     'users-guide': HgRepository('doc/users-guide', 'https://bitbucket.org/natcap/invest.users-guide'),
     'invest-data': SVNRepository('data/invest-data', 'svn://scm.naturalcapitalproject.org/svn/invest-sample-data'),
     'test-data': SVNRepository('data/invest-test-data', 'svn://scm.naturalcapitalproject.org/svn/invest-test-data'),
+    'pest-control-data': SVNRepository('data/invest-pest-control-data', 'svn://scm.naturalcapitalproject.org/svn/invest-pest-control-data'),
     'invest-2': HgRepository('src/invest-natcap.default', 'http://bitbucket.org/natcap/invest.arcgis'),
     'pyinstaller': GitRepository('src/pyinstaller', 'https://github.com/pyinstaller/pyinstaller.git'),
     'pygeoprocessing': HgRepository('src/pygeoprocessing', 'https://bitbucket.org/richpsharp/pygeoprocessing'),
