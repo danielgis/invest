@@ -171,9 +171,8 @@ def requirements(*pkgnames):
     return found_pkgnames.values()
 
 
-#BUILD_REQUIREMENTS = ['cython', 'numpy'] + requirements('pygeoprocessing',
-#                                                        'natcap.versioner')
-BUILD_REQUIREMENTS = ['cython', 'numpy'] + requirements('natcap.versioner')
+BUILD_REQUIREMENTS = ['cython', 'numpy'] + requirements('pygeoprocessing',
+                                                        'natcap.versioner')
 
 
 setup(
@@ -187,7 +186,6 @@ setup(
     packages=[
         'natcap',
         'natcap.invest',
-        'natcap.invest.crop_production',
         'natcap.invest.coastal_blue_carbon',
         'natcap.invest.coastal_vulnerability',
         'natcap.invest.dbfpy',
