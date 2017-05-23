@@ -48,19 +48,30 @@ def execute(args):
         args['bathymetry_path'] (string): path to a single band bathymetry
             raster that is projected in linear units and values represent
             elevations.
-        args['shore_height'] (float): value in bathymetry raster that
-            represents the shoreline elevation.  In most cases this would be
+        args['sea_bed_depth'] (float): value in bathymetry raster that
+            represents the depth of the sea bed.  In most cases this would be
             0.
+        args['nearshore_step_size'] (float): the number of linear units per
+            step to sample the profile when in nearshore mode.
+        args['offshore_step_size'] (float): the number of linear units per
+            step to sample the profile when in offshore mode.
+        args['nearshore_depth'] (float): a value in the bathemetry raster
+            that indicates where the nearshore 'mode' starts when calculating
+            stepsizes; depths less than this have a stepsize of
+            `args['nearshore_step_size']`.
+        args['offshore_depth'] (float): a value in the bathymetry raster
+            indicating where the offshore 'mode' starts; depths greater than
+            this have a stepsize value of `args['offshore_step_size']`.
+        args['onshore_depth_threshold'] (float): the depth (or elevation) at
+            which to cutoff the profile extractor onshore.
+        args['offshore_depth_threshold'] (float): the depth at which to
+            cutoffthe profile extractor sample length.
+        args['max_profile_length'] (float): the maximum cutoff threshold for
+            a profile which overrides the `args['*_depth_threshold']` values.
         args['representative_point_vector_path'] (string): Path to a point
             vector file that contains points from which to sample bathymetry.
-        args['step_size'] (float): the number of linear units per step to
-            sample the profile.
-        args['offshore_profile_length'] (float): length of the profile
-            in the offshore direction linear units.
-        args['onshore_profile_length'] (float): length of profile in onshore
-            direction linear units.
-        args['habitat_vector_path_list'] (list): List of paths to vector files
-            that represent habitat layers.  The presence of overlap/no overlap
+        args['habitat_vector_directory_path'] (list): Path to a directory
+            that contains habitat layers.  The presence of overlap/no overlap
             will be included in the profile results.
 
     Returns:
