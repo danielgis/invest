@@ -38,7 +38,7 @@ _TMP_BASE_FILES = {
 _MASK_NODATA = -1
 
 def execute(args):
-    """Profile generator.
+    """InVEST XBeach Storm Surge Model.
 
     Parameters:
         args['workspace_dir'] (string): output directory for intermediate,
