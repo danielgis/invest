@@ -32,6 +32,119 @@
           },
           "required": false,
           "helpText": "This text will be appended to the end of the output files to help separate multiple runs."
+        },
+        {
+          "id": "bathymetry_path",
+          "args_id": "bathymetry_path",
+          "type": "file",
+          "label": "Bathymetry Map (Raster)",
+          "defaultValue": "../Base_Data/Marine/DEMs/claybark_dem",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          },
+          "helpText": "A bathymetry raster file with an elevation value for each cell, such that 'underwater' cells can have a negative value."
+        },
+        {
+          "id": "sea_bed_depth",
+          "args_id": "sea_bed_depth",
+          "type": "text",
+          "label": "Sea Bed Depth (m)",
+          "defaultValue": "0.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "Value in the bathemetry raster that represents the height of the sea bed.  In most cases this is 0.0."
+        },
+        {
+          "id": "nearshore_step_size",
+          "args_id": "nearshore_step_size",
+          "type": "text",
+          "label": "Nearshore Step Size (m)",
+          "defaultValue": "5.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "The step size to use when sampling any points on the bathemetry layer that are higher than the nearshore depth."
+        },
+        {
+          "id": "offshore_step_size",
+          "args_id": "offshore_step_size",
+          "type": "text",
+          "label": "Offshore Step Size (m)",
+          "defaultValue": "30.0  ",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "The step size to use when sampling any points on the bathemetry layer that are deeper than the offshore depth."
+        },
+        {
+          "id": "nearshore_height",
+          "args_id": "nearshore_height",
+          "type": "text",
+          "label": "Nearshore height (m)",
+          "defaultValue": "8.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A value in the bathemetry raster that indicates where the nearshore 'mode' starts when calculating stepsizes; depths less than this have a stepsize of nearshore_step_size."
+        },
+        {
+          "id": "offshore_depth",
+          "args_id": "offshore_depth",
+          "type": "text",
+          "label": "Offshore depth (m)",
+          "defaultValue": "-30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A value in the bathemetry raster that indicates where the offshore 'mode' starts when calculating stepsizes; depths greater than this have a stepsize of offshore_step_size."
+        },
+        {
+          "id": "onshore_depth_threshold",
+          "args_id": "onshore_depth_threshold",
+          "type": "text",
+          "label": "Onshore Depth Threshold (m)",
+          "defaultValue": "8.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A cutoff value for sampling the bathemetry profile.  The profile will not extend beyond any height that exceeds this value."
+        },
+        {
+          "id": "offshore_depth_threshold",
+          "args_id": "offshore_depth_threshold",
+          "type": "text",
+          "label": "Offshore Depth Threshold (m)",
+          "defaultValue": "-30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A cutoff value for sampling the bathemetry profile.  The profile will not extend below any depth that exceeds this value."
+        },
+        {
+          "id": "max_profile_length",
+          "args_id": "max_profile_length",
+          "type": "text",
+          "label": "Maximum Profile Length (m)",
+          "defaultValue": "2000.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A cutoff value for extending the profile.  The profile will not extend to a length any greater than this value."
+        },
+        {
+          "id": "representative_point_vector_path",
+          "args_id": "representative_point_vector_path",
+          "type": "file",
+          "label": "Representative Points (Vector)",
+          "defaultValue": "",
+          "required": true,
+          "helpText": "This is a point layer that represents represenative points to sample the shore.  The model will extend profiles through these points to the nearest shoreline."
+        },
+        {
+          "id": "habitat_vector_directory_path",
+          "args_id": "habitat_vector_directory_path",
+          "type": "file",
+          "label": "Directory of Habitat Vectors (Directory)",
+          "defaultValue": "",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          },
+          "helpText": "Path to a directory that contains habitat layers.  The presence of overlap/no overlap will be included in the profile results."
         }
       ]
     }
