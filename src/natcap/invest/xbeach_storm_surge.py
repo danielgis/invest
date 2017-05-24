@@ -21,21 +21,29 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 
 LOGGER = logging.getLogger('natcap.invest.xbeach_storm_surge')
 
+_PROFILE_WORK_DIRECTORY = 'shore_profile_work_directory'
+
+# All files with %s must be replaced by file suffix
+_LAND_MASK_FILE_PATTERN = os.path.join(
+    _PROFILE_WORK_DIRECTORY, 'land_mask%s.tif')
+
 _OUTPUT_BASE_FILES = {
     }
-
 _INTERMEDIATE_BASE_FILES = {
-    'land_mask': 'land_mask.tif',
-    'shore_mask': 'shore_mask.tif',
-    'shore_convolution': 'shore_convolution.tif',
-    'shore_points': 'shore_points.shp',
+    'shore_mask': os.path.join(
+        _PROFILE_WORK_DIRECTORY, 'shore_mask%s.tif'),
+    'shore_convolution': os.path.join(
+        _PROFILE_WORK_DIRECTORY, 'shore_convolution%s.tif'),
+    'shore_points': os.path.join(
+        _PROFILE_WORK_DIRECTORY, 'shore_points%s.shp'),
     }
-
 _TMP_BASE_FILES = {
-    'shore_kernel': 'shore_kernel.tif',
+    'shore_kernel': 'shore_kernel%s.tif',
     }
 
-_MASK_NODATA = -1
+# Masks are 0 or 1, so 2 is a fine nodata value
+_MASK_NODATA = 2
+
 
 def execute(args):
     """InVEST XBeach Storm Surge Model.
@@ -77,38 +85,49 @@ def execute(args):
     Returns:
         None.
     """
+    # Make initial directory structure
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
-    intermediate_output_dir = os.path.join(
-        args['workspace_dir'], 'intermediate_outputs')
+    profile_work_dir = os.path.join(
+        args['workspace_dir'], _PROFILE_WORK_DIRECTORY)
     output_dir = os.path.join(args['workspace_dir'])
-    for dir_path in [output_dir, intermediate_output_dir]:
+    for dir_path in [output_dir, profile_work_dir]:
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
-    f_reg = utils.build_file_registry(
-        [(_OUTPUT_BASE_FILES, output_dir),
-         (_INTERMEDIATE_BASE_FILES, intermediate_output_dir),
-         (_TMP_BASE_FILES, output_dir)], file_suffix)
+    f_reg = {}
 
-    bathymetry_nodata = pygeoprocessing.get_nodata_from_uri(
-        args['bathymetry_path'])
-    bathy_rows, bathy_cols = pygeoprocessing.get_row_col_from_uri(
-        args['bathymetry_path'])
+    bathymetry_info = pygeoprocessing.get_raster_info(args['bathymetry_path'])
+    if bathymetry_info['n_bands'] > 1:
+        raise ValueError(
+            "The bathymetry raster at '%s' has more than one band, expected "
+            "a single band raster.", args['bathymetry_path'])
+
+    sea_bed_depth = float(args['sea_bed_depth'])
 
     def _land_mask_op(bathymetry):
         """Mask values >= shore height."""
         result = numpy.empty(bathymetry.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
-        valid_mask = bathymetry != bathymetry_nodata
+        valid_mask = bathymetry != bathymetry_info['nodata'][0]
         result[valid_mask] = numpy.where(
-            bathymetry[valid_mask] >= args['shore_height'], 1, 0)
+            bathymetry[valid_mask] >= sea_bed_depth, 1, 0)
         return result
 
-    bathymetry_pixel_size = pygeoprocessing.get_cell_size_from_uri(
-        args['bathymetry_path'])
-    pygeoprocessing.vectorize_datasets(
-        [args['bathymetry_path']], _land_mask_op, f_reg['land_mask'],
-        gdal.GDT_Int16, _MASK_NODATA, bathymetry_pixel_size, 'intersection',
-        vectorize_op=False, datasets_are_pre_aligned=True)
+    if (
+        abs(bathymetry_info['pixel_size'][0]) !=
+            abs(bathymetry_info['pixel_size'][1])):
+        LOGGER.warn(
+            "Bathymetry pixels are not square as %s, this may incorrectly "
+            "affect profile direction sampling",
+            bathymetry_info['pixel_size'])
+
+    LOGGER.info("Calculating land mask.")
+    f_reg['land_mask'] = os.path.join(
+        output_dir, _LAND_MASK_FILE_PATTERN % file_suffix)
+    pygeoprocessing.raster_calculator(
+        [(args['bathymetry_path'], 1)], _land_mask_op, f_reg['land_mask'],
+        gdal.GDT_Byte, _MASK_NODATA, calc_raster_stats=False)
+
+    sys.exit()
 
     bathymetry_raster = gdal.Open(args['bathymetry_path'])
     bathymetry_band = bathymetry_raster.GetRasterBand(1)
@@ -176,6 +195,8 @@ def execute(args):
     LOGGER.info("Constructing offshore profiles")
     representative_point_vector = ogr.Open(
         args['representative_point_vector_path'])
+    bathy_rows, bathy_cols = pygeoprocessing.get_row_col_from_uri(
+        args['bathymetry_path'])
     for representative_point_layer in representative_point_vector:
         for representative_point in representative_point_layer:
             point_name = representative_point.GetField('name')
@@ -287,7 +308,7 @@ def execute(args):
             if 'profile_lines' not in f_reg:
                 f_reg['profile_lines'] = {}
             f_reg['profile_lines'][point_name] = os.path.join(
-                intermediate_output_dir, 'profile_line_%s_%s.shp' % (
+                profile_work_dir, 'profile_line_%s_%s.shp' % (
                     args['results_suffix'], point_name))
             if os.path.exists(f_reg['profile_lines'][point_name]):
                 os.remove(f_reg['profile_lines'][point_name])
