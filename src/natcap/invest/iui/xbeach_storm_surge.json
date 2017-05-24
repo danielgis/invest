@@ -46,6 +46,27 @@
           "helpText": "A bathymetry raster file with an elevation value for each cell, such that 'underwater' cells can have a negative value."
         },
         {
+          "id": "representative_point_vector_path",
+          "args_id": "representative_point_vector_path",
+          "type": "file",
+          "label": "Representative Points (Point Vector)",
+          "defaultValue": "../storm_surge/claybark_sample_points.shp",
+          "required": true,
+          "validateAs": {
+            "type": "OGR"
+          },
+          "helpText": "This is a point layer that of representative points to sample the shore.  The model will extend profiles through these points to the nearest shoreline.  Must contain a field called `id` with unique values per feature."
+        },
+        {
+          "id": "habitat_vector_path",
+          "args_id": "habitat_vector_path",
+          "type": "file",
+          "label": "Habitat Layer File (Polygon Vector)",
+          "defaultValue": "../storm_surge/habitat_layers.shp",
+          "required": true,
+          "helpText": "A habitat layer, must contain a field called `hab_type`.  The presence of overlap/no overlap will be included in the profile results."
+        },
+        {
           "id": "sea_bed_depth",
           "args_id": "sea_bed_depth",
           "type": "text",
@@ -124,27 +145,6 @@
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
           "helpText": "A cutoff value for extending the profile.  The profile will not extend to a length any greater than this value."
-        },
-        {
-          "id": "representative_point_vector_path",
-          "args_id": "representative_point_vector_path",
-          "type": "file",
-          "label": "Representative Points (Vector)",
-          "defaultValue": "",
-          "required": true,
-          "validateAs": {
-            "type": "OGR"
-          },
-          "helpText": "This is a point layer that represents represenative points to sample the shore.  The model will extend profiles through these points to the nearest shoreline."
-        },
-        {
-          "id": "habitat_vector_directory_path",
-          "args_id": "habitat_vector_directory_path",
-          "type": "file",
-          "label": "Directory of Habitat Vectors (Directory)",
-          "defaultValue": "",
-          "required": true,
-          "helpText": "Path to a directory that contains habitat layers.  The presence of overlap/no overlap will be included in the profile results."
         }
       ]
     }
