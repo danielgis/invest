@@ -33,11 +33,8 @@ _SHORE_CONVOLUTION_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'shore_convolution%s.tif')
 _SHORE_MASK_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'shore_mask%s.tif')
-
-_INTERMEDIATE_BASE_FILES = {
-    'shore_points': os.path.join(
-        _PROFILE_WORK_DIRECTORY, 'shore_points%s.shp'),
-    }
+_SHORE_POINTS_FILE_PATTERN = os.path.join(
+    _PROFILE_WORK_DIRECTORY, 'shore_points%s.shp')
 
 # Masks are 0 or 1, so 127 is a good value for a signed or unsigned byte
 _MASK_NODATA = 127
@@ -118,63 +115,64 @@ def execute(args):
             bathymetry_info['pixel_size'])
 
     LOGGER.info("Calculating land mask.")
-    f_reg['land_mask'] = os.path.join(
+    f_reg['land_mask_path'] = os.path.join(
         args['workspace_dir'], _LAND_MASK_FILE_PATTERN % file_suffix)
     pygeoprocessing.raster_calculator(
-        [(args['bathymetry_path'], 1)], _land_mask_op, f_reg['land_mask'],
+        [(args['bathymetry_path'], 1)], _land_mask_op, f_reg['land_mask_path'],
         gdal.GDT_Byte, _MASK_NODATA, calc_raster_stats=False)
 
-    LOGGER.info("Calculating shore pixels.")
-    f_reg['shore_kernel'] = os.path.join(
+    LOGGER.info("Detecting shore pixels.")
+    f_reg['shore_kernel_path'] = os.path.join(
         args['workspace_dir'], _SHORE_KERNEL_FILE_PATTERN % file_suffix)
-    _make_shore_kernel(f_reg['shore_kernel'])
-
-    f_reg['shore_convolution'] = os.path.join(
+    _make_shore_kernel(f_reg['shore_kernel_path'])
+    f_reg['shore_convolution_path'] = os.path.join(
         args['workspace_dir'], _SHORE_CONVOLUTION_FILE_PATTERN % file_suffix)
-
     pygeoprocessing.convolve_2d(
-        (f_reg['land_mask'], 1), (f_reg['shore_kernel'], 1),
-        f_reg['shore_convolution'], target_datatype=gdal.GDT_Byte)
-
+        (f_reg['land_mask_path'], 1), (f_reg['shore_kernel_path'], 1),
+        f_reg['shore_convolution_path'], target_datatype=gdal.GDT_Byte)
     shore_convolution_info = pygeoprocessing.get_raster_info(
-        f_reg['shore_convolution'])
+        f_reg['shore_convolution_path'])
 
     def _shore_mask_op(shore_convolution):
         """Mask values on land that border water."""
         result = numpy.empty(shore_convolution.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
         valid_mask = shore_convolution != shore_convolution_info['nodata'][0]
+        # If a pixel is on land, it gets at least a 9, but if it's all on
+        # land it gets an 17 (8 neighboring pixels), so we search between 9
+        # and 17 to determine a shore pixel
         result[valid_mask] = numpy.where(
             (shore_convolution[valid_mask] >= 9) &
             (shore_convolution[valid_mask] < 17), 1, _MASK_NODATA)
         return result
 
-    f_reg['shore_mask'] = os.path.join(
+    f_reg['shore_mask_path'] = os.path.join(
         args['workspace_dir'], _SHORE_MASK_FILE_PATTERN % file_suffix)
     pygeoprocessing.raster_calculator(
-        [(f_reg['shore_convolution'], 1)], _shore_mask_op, f_reg['shore_mask'],
+        [(f_reg['shore_convolution_path'], 1)], _shore_mask_op, f_reg['shore_mask_path'],
         gdal.GDT_Byte, _MASK_NODATA, calc_raster_stats=False)
 
-    sys.exit()
-
-    shore_raster = gdal.Open(f_reg['shore_mask'])
-    shore_geotransform = shore_raster.GetGeoTransform()
-
+    LOGGER.info("Calculate shore points as a vector.")
+    f_reg['shore_points_path'] = os.path.join(
+        args['workspace_dir'], _SHORE_POINTS_FILE_PATTERN % file_suffix)
     esri_driver = ogr.GetDriverByName("ESRI Shapefile")
-    if os.path.exists(f_reg['shore_points']):
-        os.remove(f_reg['shore_points'])
-    shore_points = esri_driver.CreateDataSource(f_reg['shore_points'])
+    if os.path.exists(f_reg['shore_points_path']):
+        os.remove(f_reg['shore_points_path'])
+    shore_points_vector = esri_driver.CreateDataSource(f_reg['shore_points_path'])
+    shore_points_srs = osr.SpatialReference(
+        pygeoprocessing.get_raster_info(
+            f_reg['shore_mask_path'])['projection'])
+    shore_points_layer = shore_points_vector.CreateLayer(
+        'shore_points_path', srs=shore_points_srs, geom_type=ogr.wkbPoint)
+    shore_points_layer_defn = shore_points_layer.GetLayerDefn()
 
-    target_sr = osr.SpatialReference(shore_raster.GetProjection())
-    shore_point_layer = shore_points.CreateLayer(
-        'shore_points', srs=target_sr, geom_type=ogr.wkbPoint)
-    shore_point_layer_defn = shore_point_layer.GetLayerDefn()
+    sys.exit()
 
     # PUT SHORELINE PIXELS INTO R-TREE
     shore_point_index = rtree.index.Index()
     LOGGER.info('Building spatial index for shore points')
     for offset_info, data_block in pygeoprocessing.iterblocks(
-            f_reg['shore_mask']):
+            f_reg['shore_mask_path']):
         row_indexes, col_indexes = numpy.mgrid[
             offset_info['yoff']:offset_info['yoff']+offset_info['win_ysize'],
             offset_info['xoff']:offset_info['xoff']+offset_info['win_xsize']]
@@ -188,13 +186,13 @@ def execute(args):
             shore_geotransform[4] * (col_indexes[valid_mask] + 0.5) +
             shore_geotransform[5] * (row_indexes[valid_mask] + 0.5))
         for x_coord, y_coord in zip(x_coordinates, y_coordinates):
-            point_feature = ogr.Feature(shore_point_layer_defn)
+            point_feature = ogr.Feature(shore_points_layer_defn)
             shore_point_index.insert(
                 0, (x_coord, y_coord), obj=(x_coord, y_coord))
             point_geometry = ogr.Geometry(ogr.wkbPoint)
             point_geometry.AddPoint(x_coord, y_coord)
             point_feature.SetGeometry(point_geometry)
-            shore_point_layer.CreateFeature(point_feature)
+            shore_points_layer.CreateFeature(point_feature)
 
     LOGGER.info("Constructing offshore profiles")
     representative_point_vector = ogr.Open(
