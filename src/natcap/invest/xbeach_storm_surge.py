@@ -22,27 +22,25 @@ logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 LOGGER = logging.getLogger('natcap.invest.xbeach_storm_surge')
 
 _PROFILE_WORK_DIRECTORY = 'shore_profile_work_directory'
+_TEMPORARY_FILE_DIRECTORY = 'tmp'
 
 # All files with %s must be replaced by file suffix
 _LAND_MASK_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'land_mask%s.tif')
+_SHORE_KERNEL_FILE_PATTERN = os.path.join(
+    _TEMPORARY_FILE_DIRECTORY, 'shore_kernel%s.tif')
+_SHORE_CONVOLUTION_FILE_PATTERN = os.path.join(
+    _PROFILE_WORK_DIRECTORY, 'shore_convolution%s.tif')
+_SHORE_MASK_FILE_PATTERN = os.path.join(
+    _PROFILE_WORK_DIRECTORY, 'shore_mask%s.tif')
 
-_OUTPUT_BASE_FILES = {
-    }
 _INTERMEDIATE_BASE_FILES = {
-    'shore_mask': os.path.join(
-        _PROFILE_WORK_DIRECTORY, 'shore_mask%s.tif'),
-    'shore_convolution': os.path.join(
-        _PROFILE_WORK_DIRECTORY, 'shore_convolution%s.tif'),
     'shore_points': os.path.join(
         _PROFILE_WORK_DIRECTORY, 'shore_points%s.shp'),
     }
-_TMP_BASE_FILES = {
-    'shore_kernel': 'shore_kernel%s.tif',
-    }
 
-# Masks are 0 or 1, so 2 is a fine nodata value
-_MASK_NODATA = 2
+# Masks are 0 or 1, so 127 is a good value for a signed or unsigned byte
+_MASK_NODATA = 127
 
 
 def execute(args):
@@ -50,9 +48,9 @@ def execute(args):
 
     Parameters:
         args['workspace_dir'] (string): output directory for intermediate,
-            temporary, and final files
+            temporary, and final files.
         args['results_suffix'] (string): (optional) string to append to any
-            output file names
+            file names produced by this model.
         args['bathymetry_path'] (string): path to a single band bathymetry
             raster that is projected in linear units and values represent
             elevations.
@@ -89,8 +87,7 @@ def execute(args):
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
     profile_work_dir = os.path.join(
         args['workspace_dir'], _PROFILE_WORK_DIRECTORY)
-    output_dir = os.path.join(args['workspace_dir'])
-    for dir_path in [output_dir, profile_work_dir]:
+    for dir_path in [args['workspace_dir'], profile_work_dir]:
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
     f_reg = {}
@@ -122,36 +119,43 @@ def execute(args):
 
     LOGGER.info("Calculating land mask.")
     f_reg['land_mask'] = os.path.join(
-        output_dir, _LAND_MASK_FILE_PATTERN % file_suffix)
+        args['workspace_dir'], _LAND_MASK_FILE_PATTERN % file_suffix)
     pygeoprocessing.raster_calculator(
         [(args['bathymetry_path'], 1)], _land_mask_op, f_reg['land_mask'],
         gdal.GDT_Byte, _MASK_NODATA, calc_raster_stats=False)
 
-    sys.exit()
-
-    bathymetry_raster = gdal.Open(args['bathymetry_path'])
-    bathymetry_band = bathymetry_raster.GetRasterBand(1)
+    LOGGER.info("Calculating shore pixels.")
+    f_reg['shore_kernel'] = os.path.join(
+        args['workspace_dir'], _SHORE_KERNEL_FILE_PATTERN % file_suffix)
     _make_shore_kernel(f_reg['shore_kernel'])
 
-    pygeoprocessing.convolve_2d_uri(
-        f_reg['land_mask'], f_reg['shore_kernel'], f_reg['shore_convolution'])
+    f_reg['shore_convolution'] = os.path.join(
+        args['workspace_dir'], _SHORE_CONVOLUTION_FILE_PATTERN % file_suffix)
 
-    shore_convolution_nodata = pygeoprocessing.get_nodata_from_uri(
+    pygeoprocessing.convolve_2d(
+        (f_reg['land_mask'], 1), (f_reg['shore_kernel'], 1),
+        f_reg['shore_convolution'], target_datatype=gdal.GDT_Byte)
+
+    shore_convolution_info = pygeoprocessing.get_raster_info(
         f_reg['shore_convolution'])
 
-    def _shore_mask(shore_convolution):
+    def _shore_mask_op(shore_convolution):
         """Mask values on land that border water."""
         result = numpy.empty(shore_convolution.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
-        valid_mask = shore_convolution != shore_convolution_nodata
+        valid_mask = shore_convolution != shore_convolution_info['nodata'][0]
         result[valid_mask] = numpy.where(
             (shore_convolution[valid_mask] >= 9) &
             (shore_convolution[valid_mask] < 17), 1, _MASK_NODATA)
         return result
-    pygeoprocessing.vectorize_datasets(
-        [f_reg['shore_convolution']], _shore_mask, f_reg['shore_mask'],
-        gdal.GDT_Int16, _MASK_NODATA, bathymetry_pixel_size, 'intersection',
-        vectorize_op=False, datasets_are_pre_aligned=True)
+
+    f_reg['shore_mask'] = os.path.join(
+        args['workspace_dir'], _SHORE_MASK_FILE_PATTERN % file_suffix)
+    pygeoprocessing.raster_calculator(
+        [(f_reg['shore_convolution'], 1)], _shore_mask_op, f_reg['shore_mask'],
+        gdal.GDT_Byte, _MASK_NODATA, calc_raster_stats=False)
+
+    sys.exit()
 
     shore_raster = gdal.Open(f_reg['shore_mask'])
     shore_geotransform = shore_raster.GetGeoTransform()
