@@ -38,7 +38,7 @@
           "args_id": "bathymetry_path",
           "type": "file",
           "label": "Bathymetry Map (Raster)",
-          "defaultValue": "../Base_Data/Marine/DEMs/claybark_dem",
+          "defaultValue": "../storm_surge/clipped_claybark_dem.tif",
           "required": true,
           "validateAs": {
             "type": "GDAL"
