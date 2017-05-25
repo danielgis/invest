@@ -35,6 +35,11 @@ _SHORE_MASK_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'shore_mask%s.tif')
 _SHORE_POINTS_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'shore_points%s.shp')
+# Replacement pattern for clipped bathymetry is (point_name, file_suffix)
+_CLIPPED_BATHYMETRY_FILE_PATTERN = os.path.join(
+    _TEMPORARY_FILE_DIRECTORY, 'clipped_bathymetry_%s%s.tif')
+
+_REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
 
 # Masks are 0 or 1, so 127 is a good value for a signed or unsigned byte
 _MASK_NODATA = 127
@@ -69,8 +74,9 @@ def execute(args):
             which to cutoff the profile extractor onshore.
         args['offshore_depth_threshold'] (float): the depth at which to
             cutoffthe profile extractor sample length.
-        args['max_profile_length'] (float): the maximum cutoff threshold for
-            a profile which overrides the `args['*_depth_threshold']` values.
+        args['max_profile_length'] (float): the maximum length of a profile
+            ray that will otherwise override the `args['*_depth_threshold']`
+            values.
         args['representative_point_vector_path'] (string): Path to a point
             vector file that contains points from which to sample bathymetry.
         args['habitat_vector_directory_path'] (list): Path to a directory
@@ -80,6 +86,9 @@ def execute(args):
     Returns:
         None.
     """
+    max_profile_length = float(args['max_profile_length'])
+    # TODO: ensure that representative points have an _REPRESENTATIVE_POINT_ID_FIELDNAME field
+
     # Make initial directory structure
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
     profile_work_dir = os.path.join(
@@ -107,7 +116,7 @@ def execute(args):
         return result
 
     if (
-        abs(bathymetry_info['pixel_size'][0]) !=
+            abs(bathymetry_info['pixel_size'][0]) !=
             abs(bathymetry_info['pixel_size'][1])):
         LOGGER.warn(
             "Bathymetry pixels are not square as %s, this may incorrectly "
@@ -149,8 +158,9 @@ def execute(args):
     f_reg['shore_mask_path'] = os.path.join(
         args['workspace_dir'], _SHORE_MASK_FILE_PATTERN % file_suffix)
     pygeoprocessing.raster_calculator(
-        [(f_reg['shore_convolution_path'], 1)], _shore_mask_op, f_reg['shore_mask_path'],
-        gdal.GDT_Byte, _MASK_NODATA, calc_raster_stats=False)
+        [(f_reg['shore_convolution_path'], 1)], _shore_mask_op,
+        f_reg['shore_mask_path'], gdal.GDT_Byte, _MASK_NODATA,
+        calc_raster_stats=False)
 
     LOGGER.info("Calculate shore points as a vector.")
     f_reg['shore_points_path'] = os.path.join(
@@ -158,7 +168,8 @@ def execute(args):
     esri_driver = ogr.GetDriverByName("ESRI Shapefile")
     if os.path.exists(f_reg['shore_points_path']):
         os.remove(f_reg['shore_points_path'])
-    shore_points_vector = esri_driver.CreateDataSource(f_reg['shore_points_path'])
+    shore_points_vector = esri_driver.CreateDataSource(
+        f_reg['shore_points_path'])
     shore_points_srs = osr.SpatialReference(
         pygeoprocessing.get_raster_info(
             f_reg['shore_mask_path'])['projection'])
@@ -166,11 +177,10 @@ def execute(args):
         'shore_points_path', srs=shore_points_srs, geom_type=ogr.wkbPoint)
     shore_points_layer_defn = shore_points_layer.GetLayerDefn()
 
-    sys.exit()
-
-    # PUT SHORELINE PIXELS INTO R-TREE
-    shore_point_index = rtree.index.Index()
+    shore_geotransform = pygeoprocessing.get_raster_info(
+        f_reg['shore_mask_path'])['geotransform']
     LOGGER.info('Building spatial index for shore points')
+    shore_point_index = rtree.index.Index()
     for offset_info, data_block in pygeoprocessing.iterblocks(
             f_reg['shore_mask_path']):
         row_indexes, col_indexes = numpy.mgrid[
@@ -195,27 +205,27 @@ def execute(args):
             shore_points_layer.CreateFeature(point_feature)
 
     LOGGER.info("Constructing offshore profiles")
+    bathy_cols, bathy_rows = bathymetry_info['raster_size']
     representative_point_vector = ogr.Open(
         args['representative_point_vector_path'])
-    bathy_rows, bathy_cols = pygeoprocessing.get_row_col_from_uri(
-        args['bathymetry_path'])
+    bathymetry_raster = gdal.Open(args['bathymetry_path'])
+    bathymetry_band = bathymetry_raster.GetRasterBand(1)
     for representative_point_layer in representative_point_vector:
         for representative_point in representative_point_layer:
-            point_name = representative_point.GetField('name')
-
+            point_name = representative_point.GetField(
+                _REPRESENTATIVE_POINT_ID_FIELDNAME)
             if 'sample_points' not in f_reg:
                 f_reg['sample_points'] = {}
 
             f_reg['sample_points'][point_name] = os.path.join(
                 args['workspace_dir'], 'sample_points_%s_%s.shp' % (
-                    point_name, args['results_suffix']))
+                    point_name, file_suffix))
             if os.path.exists(f_reg['sample_points'][point_name]):
                 os.remove(f_reg['sample_points'][point_name])
             sample_points_vector = esri_driver.CreateDataSource(
                 f_reg['sample_points'][point_name])
-            target_sr = osr.SpatialReference(shore_raster.GetProjection())
             sample_points_layer = sample_points_vector.CreateLayer(
-                'sample_points_%s' % point_name, srs=target_sr,
+                'sample_points_%s' % point_name, srs=shore_points_srs,
                 geom_type=ogr.wkbPoint)
             sample_points_layer.CreateField(
                 ogr.FieldDefn("s_depth", ogr.OFTReal))
@@ -235,90 +245,223 @@ def execute(args):
             vector_length = (
                 (representative_point[0]-shore_point[0]) ** 2 +
                 (representative_point[1]-shore_point[1]) ** 2) ** 0.5
-            x_size = (
+            direction_x = (
                 (representative_point[0]-shore_point[0]) / vector_length)
-            y_size = (
+            direction_y = (
                 (representative_point[1]-shore_point[1]) / vector_length)
-            sample_point_list = []
 
-            # test if represenative point is on land or water
-            bathymetry_gt = pygeoprocessing.get_geotransform_uri(
-                args['bathymetry_path'])
+            # create a bounding box that will capture the maximum length of
+            # the sample vector with form [minx, miny, maxx, maxy]
+            profile_bounding_box = [
+                representative_point[0] -
+                abs(direction_x) * max_profile_length,
+                representative_point[1] -
+                abs(direction_y) * max_profile_length,
+                representative_point[0] +
+                abs(direction_x) * max_profile_length,
+                representative_point[1] +
+                abs(direction_y) * max_profile_length]
+
+            clipped_bathymetry_path = os.path.join(
+                args['workspace_dir'], _CLIPPED_BATHYMETRY_FILE_PATTERN % (
+                    point_name, file_suffix))
+            pygeoprocessing.warp_raster(
+                args['bathymetry_path'], bathymetry_info['pixel_size'],
+                clipped_bathymetry_path, 'nearest',
+                target_bb=profile_bounding_box,
+                gtiff_creation_options=['TILED=YES', 'BIGTIFF=IF_SAFER'])
+            clipped_bathymetry_info = pygeoprocessing.get_raster_info(
+                clipped_bathymetry_path)
+            clipped_bathymetry_geotransform = (
+                clipped_bathymetry_info['geotransform'])
+            clipped_bathymetry_raster = gdal.Open(clipped_bathymetry_path)
+            clipped_bathymetry_band = (
+                clipped_bathymetry_raster.GetRasterBand(1))
+
+            # test if representative point is on land or water
             representative_point_coords = (
-                int((representative_point[0] - bathymetry_gt[0]) /
-                    bathymetry_gt[1]),
-                int((representative_point[1] - bathymetry_gt[3]) /
-                    bathymetry_gt[5]))
+                int((representative_point[0] - shore_geotransform[0]) /
+                    shore_geotransform[1]),
+                int((representative_point[1] - shore_geotransform[3]) /
+                    shore_geotransform[5]))
 
-            # check if representative point is on land, if so; flip direction
+            # check if representative point is on land by reading one pixel
+            # from the raster.  And if so; flip direction of tracing vector
             representative_point_elevation = bathymetry_band.ReadAsArray(
                 xoff=representative_point_coords[0],
                 yoff=representative_point_coords[1],
                 win_xsize=1, win_ysize=1)
-            if representative_point_elevation >= args['shore_height']:
-                x_size *= -1
-                y_size *= -1
+            if representative_point_elevation >= sea_bed_depth:
+                direction_x *= -1
+                direction_y *= -1
 
-            # construct step distances away from shore
-            offshore_steps = []
-            onshore_steps = [0.0]
-            current_distance = 0.0
-            near_dist = args['step_size'][0][1]
-            far_dist = args['step_size'][1][1]
-            near_stepsize = args['step_size'][0][0]
-            far_stepsize = args['step_size'][1][0]
-            current_step = near_stepsize
-            while True:
-                out_of_range = True
-                current_distance += current_step
-                if current_distance <= args['offshore_profile_length']:
-                    offshore_steps.append(current_distance)
-                    out_of_range = False
-                if current_distance <= args['onshore_profile_length']:
-                    onshore_steps.append(-current_distance)
-                    out_of_range = False
-                if out_of_range:
-                    break
-                if current_distance <= near_dist:
-                    current_step = near_stepsize
-                elif current_distance >= far_dist:
-                    current_step = far_stepsize
-                else:
-                    # bargain basement linear interpolation
-                    t_pos = (current_distance - far_dist) / (
-                        near_dist - far_dist)
-                    current_step = (
-                        t_pos * near_stepsize + (1 - t_pos) * far_stepsize)
-            # work from offshore inward
-            onshore_steps.reverse()
+            # Start at shore point, walk landward and seaward
 
-            for step in onshore_steps + offshore_steps:
-                point_feature = ogr.Feature(sample_points_layer_defn)
-                sample_point_geometry = ogr.Geometry(ogr.wkbPoint)
-                sample_point_list.append(
-                    (shore_point[0] + x_size * step,
-                     shore_point[1] + y_size * step))
-                sample_point_geometry.AddPoint(
-                    sample_point_list[-1][0], sample_point_list[-1][1])
-                point_feature.SetGeometry(sample_point_geometry)
-                # make sure we account for step size going negative when we're
-                # on land
-                point_feature.SetField('s_dist', step)
-                sample_points_layer.CreateFeature(point_feature)
+            # bounding box coordinates are this [minx, miny, maxx, maxy]
+            # initialize to crazy bounding box so test for bounds fails
+            clipped_bathymetry_block = None
+            sample_points = []
+            for direction_scale in [-1, 1]:
+                window_bounding_box = [1, 1, -1, -1]
+                current_point = shore_point
+
+                while True:
+                    # test if point outside  the max profile bounding box
+                    # break if so because we've gone too far
+                    if (current_point[0] < profile_bounding_box[0] or
+                            current_point[0] > profile_bounding_box[2] or
+                            current_point[1] < profile_bounding_box[1] or
+                            current_point[1] > profile_bounding_box[3]):
+                        break
+
+                    # it's a valid point, add it to the shapefile vector
+                    point_feature = ogr.Feature(sample_points_layer_defn)
+                    point_geometry = ogr.Geometry(ogr.wkbPoint)
+                    point_geometry.AddPoint(
+                        current_point[0], current_point[1])
+                    point_feature.SetGeometry(point_geometry)
+                    sample_points_layer.CreateFeature(point_feature)
+
+                    # test if point outside bounding box and if so load a
+                    # new bounding box
+                    if (current_point[0] < window_bounding_box[0] or
+                            current_point[0] > window_bounding_box[2] or
+                            current_point[1] < window_bounding_box[1] or
+                            current_point[1] > window_bounding_box[3]):
+                        # convert coordinates to raster indexes
+                        current_point_coords = (
+                            int((current_point[0] -
+                                 clipped_bathymetry_geotransform[0]) /
+                                clipped_bathymetry_geotransform[1]),
+                            int((current_point[1] -
+                                 clipped_bathymetry_geotransform[3]) /
+                                clipped_bathymetry_geotransform[5]))
+                        block_index = [
+                            current_point_coords[0] /
+                            clipped_bathymetry_info['block_size'][0],
+                            current_point_coords[1] /
+                            clipped_bathymetry_info['block_size'][1]]
+                        # make raster pixel bounds to get an efficient ReadAsArray
+                        # call, format is: [minx, miny, maxx, maxy]
+                        raster_window_bounds = [
+                            block_index[0] *
+                            clipped_bathymetry_info['block_size'][0],
+                            block_index[1] *
+                            clipped_bathymetry_info['block_size'][1],
+                            (block_index[0] + 1) *
+                            clipped_bathymetry_info['block_size'][0],
+                            (block_index[1] + 1) *
+                            clipped_bathymetry_info['block_size'][1],
+                        ]
+                        # update bounds by 1 pixel if possible
+                        if raster_window_bounds[0] > 0:
+                            raster_window_bounds[0] -= 1
+                        if raster_window_bounds[1] > 0:
+                            raster_window_bounds[1] -= 1
+                        if (raster_window_bounds[2] <
+                                clipped_bathymetry_info['raster_size'][0] - 1):
+                            raster_window_bounds[2] += 1
+                        elif (raster_window_bounds[2] >
+                              clipped_bathymetry_info['raster_size'][0]):
+                            # fix a case where a boundary might be bigger than
+                            # the raster
+                            raster_window_bounds[2] = (
+                                clipped_bathymetry_info['raster_size'][0])
+                        if (raster_window_bounds[3] <
+                                clipped_bathymetry_info['raster_size'][1] - 1):
+                            raster_window_bounds[3] += 1
+                        elif (raster_window_bounds[3] >
+                              clipped_bathymetry_info['raster_size'][1]):
+                            # fix a case where a boundary might be bigger than
+                            # the raster
+                            raster_window_bounds[3] = (
+                                clipped_bathymetry_info['raster_size'][1])
+
+                        # update the bounding box in projected coordinates
+                        # format: [minx, miny, maxx, maxy]
+
+                        window_bounding_box = [
+                            clipped_bathymetry_geotransform[0] +
+                            raster_window_bounds[0] *
+                            clipped_bathymetry_geotransform[1],
+                            clipped_bathymetry_geotransform[3] +
+                            raster_window_bounds[1] *
+                            clipped_bathymetry_geotransform[5],
+                            clipped_bathymetry_geotransform[0] +
+                            raster_window_bounds[2] *
+                            clipped_bathymetry_geotransform[1],
+                            clipped_bathymetry_geotransform[3] +
+                            raster_window_bounds[3] *
+                            clipped_bathymetry_geotransform[5],
+                            ]
+
+                        clipped_bathymetry_block = (
+                            clipped_bathymetry_band.ReadAsArray(
+                                xoff=raster_window_bounds[0],
+                                yoff=raster_window_bounds[1],
+                                win_xsize=(
+                                    raster_window_bounds[2] -
+                                    raster_window_bounds[0]),
+                                win_ysize=(
+                                    raster_window_bounds[3] -
+                                    raster_window_bounds[1])))
+
+                        x_coordinates = numpy.arange(
+                            clipped_bathymetry_block.shape[1])
+                        x_coordinates = (
+                            clipped_bathymetry_geotransform[0] + (
+                                x_coordinates + raster_window_bounds[0] + 0.5) *
+                            clipped_bathymetry_geotransform[1])
+                        y_coordinates = numpy.arange(
+                            clipped_bathymetry_block.shape[0])
+                        # reverse the y coordinates so they are increasing
+                        y_coordinates = numpy.flipud(
+                            clipped_bathymetry_geotransform[3] + (
+                                y_coordinates + raster_window_bounds[1] + 0.5) *
+                            clipped_bathymetry_geotransform[5])
+                        # reverse rows in the array so they match y coordinates
+                        clipped_bathymetry_block = numpy.flipud(
+                            clipped_bathymetry_block)
+
+                        # create a linear interpolator for the current block
+                        interp_fn = scipy.interpolate.RectBivariateSpline(
+                            y_coordinates, x_coordinates,
+                            clipped_bathymetry_block, kx=1, ky=1)
+
+                        raster_window_bounds = None
+
+                    # append the current point and its interpolated depth
+                    sample_points.append((
+                        current_point,
+                        interp_fn(current_point[1], current_point[0])))
+
+                    current_point = (
+                        current_point[0] +
+                        direction_x * float(args['nearshore_step_size']) *
+                        direction_scale,
+                        current_point[1] +
+                        direction_y * float(args['nearshore_step_size']) *
+                        direction_scale)
+
+            clipped_bathymetry_block = None
+            clipped_bathymetry_band = None
+            clipped_bathymetry_raster = None
+
+            LOGGER.debug(sample_points)
+            sys.exit()
 
             sample_points_layer.SyncToDisk()
             if 'profile_lines' not in f_reg:
                 f_reg['profile_lines'] = {}
             f_reg['profile_lines'][point_name] = os.path.join(
                 profile_work_dir, 'profile_line_%s_%s.shp' % (
-                    args['results_suffix'], point_name))
+                    file_suffix, point_name))
             if os.path.exists(f_reg['profile_lines'][point_name]):
                 os.remove(f_reg['profile_lines'][point_name])
             profile_lines_vector = esri_driver.CreateDataSource(
                 f_reg['profile_lines'][point_name])
-            target_sr = osr.SpatialReference(shore_raster.GetProjection())
             profile_lines_layer = profile_lines_vector.CreateLayer(
-                'profile_lines_%s' % point_name, srs=target_sr,
+                'profile_lines_%s' % point_name, srs=shore_points_srs,
                 geom_type=ogr.wkbLineString)
             profile_lines_layer_defn = profile_lines_layer.GetLayerDefn()
             line_feature = ogr.Feature(profile_lines_layer_defn)
@@ -336,23 +479,19 @@ def execute(args):
             # always want to round up on the max and round down on the min
             # reverse last two because y coord moves up while pixels move down
             extent_in_pixel_coords = (
-                int((extent[0] - bathymetry_gt[0]) / bathymetry_gt[1]) - 1,
-                int(round(0.5 + (extent[1] - bathymetry_gt[0]) /
-                          bathymetry_gt[1])) + 1,
-                int(((extent[3] - bathymetry_gt[3]) /
-                     bathymetry_gt[5])) - 1,
-                int(round(0.5+(extent[2] - bathymetry_gt[3]) /
-                          bathymetry_gt[5])) + 1)
+                int((extent[0] - shore_geotransform[0]) / shore_geotransform[1]) - 1,
+                int(round(0.5 + (extent[1] - shore_geotransform[0]) /
+                          shore_geotransform[1])) + 1,
+                int(((extent[3] - shore_geotransform[3]) /
+                     shore_geotransform[5])) - 1,
+                int(round(0.5+(extent[2] - shore_geotransform[3]) /
+                          shore_geotransform[5])) + 1)
 
             bounding_box_point = ogr.Geometry(ogr.wkbLineString)
-            bounding_box_point.AddPoint(
-                extent[0], extent[2])
-            bounding_box_point.AddPoint(
-                extent[0], extent[3])
-            bounding_box_point.AddPoint(
-                extent[1], extent[3])
-            bounding_box_point.AddPoint(
-                extent[1], extent[2])
+            bounding_box_point.AddPoint(extent[0], extent[2])
+            bounding_box_point.AddPoint(extent[0], extent[3])
+            bounding_box_point.AddPoint(extent[1], extent[3])
+            bounding_box_point.AddPoint(extent[1], extent[2])
             line_feature.SetGeometry(bounding_box_point)
             profile_lines_layer.CreateFeature(line_feature)
 
@@ -370,8 +509,8 @@ def execute(args):
                     # this works because offset will be negative
                     offset_dict[winsize] += offset_dict[offset]
                     LOGGER.error(
-                        "Profile sample outside of bathymetry raster, results "
-                        "will be clipped to edge.")
+                        "Profile sample outside of bathymetry raster, "
+                        "results will be clipped to edge.")
                     offset_dict[offset] = 0
             # now check if window is too large
             for offset, winsize, rastersize in [
@@ -381,8 +520,8 @@ def execute(args):
                     # this works because offset will be negative
                     offset_dict[winsize] = rastersize - offset_dict[offset]
                     LOGGER.error(
-                        "Profile sample outside of bathymetry raster, results "
-                        "will be clipped to edge.")
+                        "Profile sample outside of bathymetry raster, "
+                        "results will be clipped to edge.")
 
             profile_lines_layer = None
             profile_lines_vector = None
@@ -391,13 +530,15 @@ def execute(args):
                 **offset_dict)
             x_coordinates = numpy.arange(clipped_bathymetry_array.shape[1])
             x_coordinates = (
-                bathymetry_gt[0] + (
-                    x_coordinates + offset_dict['xoff'] + 0.5) * bathymetry_gt[1])
+                shore_geotransform[0] + (
+                    x_coordinates + offset_dict['xoff'] + 0.5) *
+                shore_geotransform[1])
             y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
             # reverse the y coordinates so they are increasing
             y_coordinates = numpy.flipud(
-                bathymetry_gt[3] + (
-                    y_coordinates + offset_dict['yoff'] + 0.5) * bathymetry_gt[5])
+                shore_geotransform[3] + (
+                    y_coordinates + offset_dict['yoff'] + 0.5) *
+                shore_geotransform[5])
             # reverse the rows in the array so they match y coordinates
             clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
 
@@ -419,7 +560,6 @@ def execute(args):
                     's_depth', float(sampled_depth_array[-1]))
                 sample_points_layer.SetFeature(sample_point)
             sample_points_layer.ResetReading()
-            #smoothed_depth_array = numpy.array(sampled_depth_array)
             sampled_depth_array = numpy.array(sampled_depth_array)
             smoothed_depth_array = scipy.signal.savgol_filter(
                 sampled_depth_array,
@@ -429,10 +569,12 @@ def execute(args):
                 f_reg['profile_table'] = {}
             f_reg['profile_table'][point_name] = os.path.join(
                 args['workspace_dir'], 'profile_table_%s_%s.csv' % (
-                    point_name, args['results_suffix']))
+                    point_name, file_suffix))
 
-            with open(f_reg['profile_table'][point_name], 'w') as profile_table:
-                profile_table.write('distance (m),depth (m),smoothed depth (m)')
+            with open(f_reg['profile_table'][point_name], 'w'
+                     ) as profile_table:
+                profile_table.write(
+                    'distance (m),depth (m),smoothed depth (m)')
                 habitat_name_list = []
                 habitat_geometry_name_list = []
                 for path_name_pair in args['habitat_vector_path_list']:
@@ -476,11 +618,13 @@ def execute(args):
 
                     habitat_crossing = [0] * len(habitat_name_list)
                     sample_point_geometry = sample_point.GetGeometryRef()
-                    for habitat_geometry, habitat_name in habitat_geometry_name_list:
+                    for habitat_geometry, habitat_name in \
+                            habitat_geometry_name_list:
                         shapely_point = shapely.wkb.loads(
                             sample_point_geometry.ExportToWkb())
                         if habitat_geometry.contains(shapely_point):
-                            habitat_crossing[habitat_name_list.index(habitat_name)] = 1
+                            habitat_crossing[
+                                habitat_name_list.index(habitat_name)] = 1
 
                     x_coord = sample_point_geometry.GetX()
                     y_coord = sample_point_geometry.GetY()
@@ -494,16 +638,6 @@ def execute(args):
             sample_points_layer.SyncToDisk()
             sample_points_layer = None
             sample_points_vector = None
-    # GENERATE SHORELINE PIXELS
-    # FOR EACH POINT:
-    #   FIND NEAREST SHORELINE POINT
-    #   CALCUALTE DIRECTION AS SHORE POINT TO SAMPLE POINT
-    #   CREATE A LINE ROOTED AT SHORE PIXEL AS LONG AS REQUEST
-    #       OR PRINT AN ERROR IF THE PIXELS GO OUT OF BOUNDS ON THE BATHYMETRY
-    #   WALK ALONG LINE FOR EACH STEP:
-    #       CALCULATE COORDINATE
-    #       SAMPLE RASTER UNDERNEATH
-    #       SAMPLE HABITAT LAYER UNDERNEATH
 
 
 def _make_shore_kernel(kernel_path):
@@ -515,12 +649,11 @@ def _make_shore_kernel(kernel_path):
 
     # Make some kind of geotransform, it doesn't matter what but
     # will make GIS libraries behave better if it's all defined
-    kernel_raster.SetGeoTransform([444720, 30, 0, 3751320, 0, -30])
+    kernel_raster.SetGeoTransform([0, 1, 0, 0, 0, -1])
     srs = osr.SpatialReference()
-    srs.SetUTM(11, 1)
-    srs.SetWellKnownGeogCS('NAD27')
+    srs.SetWellKnownGeogCS('WGS84')
     kernel_raster.SetProjection(srs.ExportToWkt())
 
     kernel_band = kernel_raster.GetRasterBand(1)
-    kernel_band.SetNoDataValue(255)
+    kernel_band.SetNoDataValue(127)
     kernel_band.WriteArray(numpy.array([[1, 1, 1], [1, 9, 1], [1, 1, 1]]))
