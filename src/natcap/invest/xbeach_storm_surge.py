@@ -38,6 +38,9 @@ _SHORE_POINTS_FILE_PATTERN = os.path.join(
 # Replacement pattern for clipped bathymetry is (point_name, file_suffix)
 _CLIPPED_BATHYMETRY_FILE_PATTERN = os.path.join(
     _TEMPORARY_FILE_DIRECTORY, 'clipped_bathymetry_%s%s.tif')
+# Replacement pattern for clipped bathymetry is (point_name, file_suffix)
+_SAMPLE_POINTS_FILE_PATTERN = os.path.join(
+    _PROFILE_WORK_DIRECTORY, 'sample_points_%s%s.shp')
 
 _REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
 
@@ -218,7 +221,7 @@ def execute(args):
                 f_reg['sample_points'] = {}
 
             f_reg['sample_points'][point_name] = os.path.join(
-                args['workspace_dir'], 'sample_points_%s_%s.shp' % (
+                args['workspace_dir'], _SAMPLE_POINTS_FILE_PATTERN % (
                     point_name, file_suffix))
             if os.path.exists(f_reg['sample_points'][point_name]):
                 os.remove(f_reg['sample_points'][point_name])
@@ -313,14 +316,6 @@ def execute(args):
                             current_point[1] < profile_bounding_box[1] or
                             current_point[1] > profile_bounding_box[3]):
                         break
-
-                    # it's a valid point, add it to the shapefile vector
-                    point_feature = ogr.Feature(sample_points_layer_defn)
-                    point_geometry = ogr.Geometry(ogr.wkbPoint)
-                    point_geometry.AddPoint(
-                        current_point[0], current_point[1])
-                    point_feature.SetGeometry(point_geometry)
-                    sample_points_layer.CreateFeature(point_feature)
 
                     # test if point outside bounding box and if so load a
                     # new bounding box
@@ -431,10 +426,11 @@ def execute(args):
                         raster_window_bounds = None
 
                     # append the current point and its interpolated depth
-                    sample_points.append((
-                        current_point,
-                        interp_fn(current_point[1], current_point[0])))
+                    interpolated_depth = interp_fn(
+                        current_point[1], current_point[0])
+                    sample_points.append((current_point, interpolated_depth))
 
+                    # udpate to next sample step
                     current_point = (
                         current_point[0] +
                         direction_x * float(args['nearshore_step_size']) *
@@ -448,6 +444,15 @@ def execute(args):
             clipped_bathymetry_raster = None
 
             LOGGER.debug(sample_points)
+
+            for (point_x, point_y), depth in sample_points:
+                point_feature = ogr.Feature(sample_points_layer_defn)
+                point_geometry = ogr.Geometry(ogr.wkbPoint)
+                point_geometry.AddPoint(point_x, point_y)
+                point_feature.SetGeometry(point_geometry)
+                point_feature.SetField('i_depth', float(depth))
+                sample_points_layer.CreateFeature(point_feature)
+
             sys.exit()
 
             sample_points_layer.SyncToDisk()
