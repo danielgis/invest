@@ -24,7 +24,7 @@ LOGGER = logging.getLogger('natcap.invest.xbeach_storm_surge')
 _PROFILE_WORK_DIRECTORY = 'shore_profile_work_directory'
 _TEMPORARY_FILE_DIRECTORY = 'tmp'
 
-# All files with %s must be replaced by file suffix
+# Replacement pattern for the following is for file_suffix
 _LAND_MASK_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'land_mask%s.tif')
 _SHORE_KERNEL_FILE_PATTERN = os.path.join(
@@ -35,14 +35,17 @@ _SHORE_MASK_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'shore_mask%s.tif')
 _SHORE_POINTS_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'shore_points%s.shp')
-# Replacement pattern for clipped bathymetry is (point_name, file_suffix)
+
+# Replacement pattern for the following is (point_name, file_suffix)
 _CLIPPED_BATHYMETRY_FILE_PATTERN = os.path.join(
     _TEMPORARY_FILE_DIRECTORY, 'clipped_bathymetry_%s%s.tif')
-# Replacement pattern for clipped bathymetry is (point_name, file_suffix)
 _SAMPLE_POINTS_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'sample_points_%s%s.shp')
-# Replacement pattern for profile table is (point_name, file_suffix)
 _PROFILE_TABLE_FILE_PATTERN = 'profile_table_%s%s.csv'
+_X_GRID_FILE_PATTERN = 'x_%s%s.grd'
+_Y_GRID_FILE_PATTERN = 'y_%s%s.grd'
+_BED_GRID_FILE_PATTERN = 'bed_%s%s.grd'
+
 
 _REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
 _HABITAT_IDENTIFIER_FIELDNAME = 'hab_type'
@@ -555,6 +558,38 @@ def execute(args):
                     for crossing_value in habitat_crossing:
                         profile_table.write(',%d' % crossing_value)
                     profile_table.write('\n')
+
+            with open(f_reg['profile_table'][point_name],
+                      'r') as profile_table:
+                profile_table.readline()  # toss the first line
+                x_grid_path = os.path.join(
+                    args['workspace_dir'], _X_GRID_FILE_PATTERN % (
+                        point_name, file_suffix))
+                y_grid_path = os.path.join(
+                    args['workspace_dir'], _Y_GRID_FILE_PATTERN % (
+                        point_name, file_suffix))
+                bed_grid_path = os.path.join(
+                    args['workspace_dir'], _BED_GRID_FILE_PATTERN % (
+                        point_name, file_suffix))
+                x_grid_file = open(x_grid_path, 'w')
+                y_grid_file = open(y_grid_path, 'w')
+                bed_grid_file = open(bed_grid_path, 'w')
+                first = True
+                for line in profile_table:
+                    line_values = [
+                        float(x) for x in line.split(',')]
+                    # format is x, depth, *habitat_overlap
+                    if not first:
+                        x_grid_file.write(',')
+                        y_grid_file.write(',')
+                        bed_grid_file.write(',')
+                    first = False
+                    x_grid_file.write('%f' % line_values[0])
+                    y_grid_file.write('0')
+                    bed_grid_file.write('%f' % line_values[1])
+                x_grid_file.close()
+                y_grid_file.close()
+                bed_grid_file.close()
 
 
 def _make_shore_kernel(kernel_path):
