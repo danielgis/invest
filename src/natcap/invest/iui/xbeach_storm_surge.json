@@ -67,6 +67,15 @@
           "helpText": "A habitat layer, must contain a field called `hab_type`.  The presence of overlap/no overlap will be included in the profile results."
         },
         {
+          "id": "habitat_parameter_dir",
+          "args_id": "habitat_parameter_dir",
+          "type": "folder",
+          "label": "Habitat Parameter Directory",
+          "defaultValue": "../storm_surge/habitat_parameter_files",
+          "required": true,
+          "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (N), canopy density (Cd), stem diameter (ah), stem height, and drag coefficient (bv)."
+        },
+        {
           "id": "sea_bed_depth",
           "args_id": "sea_bed_depth",
           "type": "text",
