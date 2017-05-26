@@ -124,6 +124,14 @@ def execute(args):
     Returns:
         None.
     """
+    #xbeach_workspace_path = os.path.join(
+    #    args['workspace_dir'], _XBEACH_WORKSPACE_DIRPATTERN % (
+    #        'a', '_foo'))
+    #process = subprocess.Popen(
+    #    [args['xbeach_binary_path']],
+    #    cwd=xbeach_workspace_path)
+    #process.wait()
+    #sys.exit()
     max_profile_length = float(args['max_profile_length'])
     # TODO: ensure that representative points have an _REPRESENTATIVE_POINT_ID_FIELDNAME field
 
@@ -643,6 +651,7 @@ def execute(args):
                         x_grid_file, y_grid_file, bed_grid_file,
                         veggiemap_file]:
                     xbeach_file.write('NaN')
+                    xbeach_file.flush()
                     xbeach_file.close()
                 del x_grid_file
                 del y_grid_file
@@ -671,8 +680,12 @@ def execute(args):
                 #os.chdir(xbeach_workspace_path)
                 #LOGGER.info(os.getcwd())
                 os.chmod(xbeach_workspace_path, stat.S_IWRITE)
+                shutil.copyfile(
+                    args['xbeach_binary_path'], os.path.join(
+                        xbeach_workspace_path, 'xbeach.exe'))
                 process = subprocess.Popen(
-                    [args['xbeach_binary_path']], cwd=xbeach_workspace_path)
+                    [args['xbeach_binary_path']],
+                    cwd=xbeach_workspace_path)
                 process.wait()
                 #os.chdir(old_wd)
 
@@ -742,6 +755,7 @@ def _write_xbeach_parameter_file(
     param_file.write("zs\n")
     param_file.write("zb\n")
     param_file.write("hh\n")
+    param_file.flush()
     param_file.close()
 
 
