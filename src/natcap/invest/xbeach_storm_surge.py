@@ -1,6 +1,8 @@
 """InVEST XBeach Storm Surge model."""
+import shutil
 import os
 import logging
+from datetime import datetime
 
 import scipy.signal
 import scipy.ndimage.filters
@@ -47,6 +49,10 @@ _Y_GRID_FILE_PATTERN = 'y_%s%s.grd'
 _BED_GRID_FILE_PATTERN = 'bed_%s%s.grd'
 _VEGGIE_GRID_FILE_PATTERN = 'veggie_%s%s.grd'
 _VEGGIEFILE_FILE_PATTERN = 'veggiefile_%s%s.txt'
+_XBEACH_WORKSPACE_DIRPATTERN = 'xbeach_workspace%s%s'
+
+_PARAMETERFILE_FILE_PATTERN = 'params.txt'
+
 _REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
 _HABITAT_IDENTIFIER_FIELDNAME = 'hab_type'
 
@@ -570,58 +576,154 @@ def execute(args):
                         profile_table.write(',%d' % crossing_value)
                     profile_table.write('\n')
 
+            LOGGER.info(
+                "Create XBeach parameter run files for %s", point_name)
+            xbeach_workspace_path = os.path.join(
+                args['workspace_dir'], _XBEACH_WORKSPACE_DIRPATTERN % (
+                    point_name, file_suffix))
+            if not os.path.exists(xbeach_workspace_path):
+                os.makedirs(xbeach_workspace_path)
+
             # write out the file that lists the habitats in the order they're
             # reported in.
             veggiefile_path = os.path.join(
-                args['workspace_dir'], _VEGGIEFILE_FILE_PATTERN % (
+                xbeach_workspace_path, _VEGGIEFILE_FILE_PATTERN % (
                     point_name, file_suffix))
             veggiefile_file = open(veggiefile_path, 'w')
             for habitat in habitat_name_list:
-                veggiefile_file.write(os.path.join(
-                    args['habitat_parameter_dir'], '%s.txt\n' % habitat))
+                base_habitat_path = os.path.join(
+                    args['habitat_parameter_dir'], '%s.txt' % habitat)
+                target_habitat_path = os.path.join(
+                    xbeach_workspace_path,
+                    os.path.basename(base_habitat_path))
+                LOGGER.debug("%s, %s" % (base_habitat_path, target_habitat_path))
+                shutil.copyfile(base_habitat_path, target_habitat_path)
+                veggiefile_file.write('%s.txt\n' % habitat)
+
             with open(f_reg['profile_table'][point_name],
                       'r') as profile_table:
                 profile_table.readline()  # toss the first line
                 x_grid_path = os.path.join(
-                    args['workspace_dir'], _X_GRID_FILE_PATTERN % (
+                    xbeach_workspace_path, _X_GRID_FILE_PATTERN % (
                         point_name, file_suffix))
                 y_grid_path = os.path.join(
-                    args['workspace_dir'], _Y_GRID_FILE_PATTERN % (
+                    xbeach_workspace_path, _Y_GRID_FILE_PATTERN % (
                         point_name, file_suffix))
                 bed_grid_path = os.path.join(
-                    args['workspace_dir'], _BED_GRID_FILE_PATTERN % (
+                    xbeach_workspace_path, _BED_GRID_FILE_PATTERN % (
                         point_name, file_suffix))
                 veggiemap_path = os.path.join(
-                    args['workspace_dir'], _VEGGIE_GRID_FILE_PATTERN % (
+                    xbeach_workspace_path, _VEGGIE_GRID_FILE_PATTERN % (
                         point_name, file_suffix))
                 x_grid_file = open(x_grid_path, 'w')
                 y_grid_file = open(y_grid_path, 'w')
                 bed_grid_file = open(bed_grid_path, 'w')
                 veggiemap_file = open(veggiemap_path, 'w')
-                first = True
                 for line in profile_table:
                     line_values = [
                         float(x) for x in line.split(',')]
                     # format is x, depth, *habitat_overlap
-                    if not first:
-                        x_grid_file.write(',')
-                        y_grid_file.write(',')
-                        bed_grid_file.write(',')
-                        veggiemap_file.write(',')
-                    first = False
-                    x_grid_file.write('%f' % line_values[0])
+                    # index 0 is the distance along the ray
+                    x_grid_file.write('%f,' % line_values[0])
                     y_grid_file.write('0')
+                    # index 1 is the height of the bathymetry
+                    bed_grid_file.write('%f,' % line_values[1])
                     try:
                         # write the first index we see, we can only write one
-                        veggiemap_file.write('%d' % (
+                        veggiemap_file.write('%d,' % (
                             line_values[2:].index(1) + 1))
                     except ValueError:
                         # no habitat in this sample
                         veggiemap_file.write('0')
-                x_grid_file.close()
-                y_grid_file.close()
-                bed_grid_file.close()
-                veggiemap_file.close()
+                for file in [
+                        x_grid_file, y_grid_file, bed_grid_file,
+                        veggiemap_file]:
+                    file.write('NaN')
+                    file.close()
+            parameter_file_path = os.path.join(
+                xbeach_workspace_path, _PARAMETERFILE_FILE_PATTERN)
+            n_points = len(sample_points)
+            xbeach_storm_parameter_path = os.path.join(
+                xbeach_workspace_path, os.path.basename(
+                    args['storm_parameter_path']))
+            shutil.copyfile(
+                args['storm_parameter_path'], xbeach_storm_parameter_path)
+            _write_xbeach_parameter_file(
+                parameter_file_path, n_points,
+                os.path.basename(bed_grid_path),
+                os.path.basename(x_grid_path),
+                os.path.basename(y_grid_path),
+                os.path.basename(xbeach_storm_parameter_path),
+                os.path.basename(veggiefile_path),
+                os.path.basename(veggiemap_path))
+
+
+def _write_xbeach_parameter_file(
+        parameter_file_path, n_points, bed_grid_path, x_grid_path,
+        y_grid_path, storm_parameter_path, veggiefile_path, veggie_grid_path):
+    """Write the XBeach parameter file as described in the design doc.
+
+    This is the example given in the design doc: https://drive.google.com/file/d/0B--GW7O9bzP9TWlmV3BxTGVHalU/view
+
+    Parameters:
+        parameter_file_path (string): path to desired output parameter file.
+
+    Returns:
+        None
+    """
+    param_file = open(parameter_file_path, 'w')
+    param_file.write("%% XBeach parameter settings input file\n")
+    param_file.write("%% date: %s\n" % str(datetime.now()))
+    param_file.write("\n")
+    param_file.write("%% Grid parameters \n")
+    param_file.write("depfile   = %s\n" % bed_grid_path)
+    param_file.write("posdwn    = 0\n")
+    param_file.write("nx        = %d\n" % n_points)
+    param_file.write("ny        = 0\n")
+    param_file.write("alfa      = 0\n")
+    param_file.write("vardx     = 1\n")
+    param_file.write("xfile     = %s\n" % x_grid_path)
+    param_file.write("yfile     = %s\n" % y_grid_path)
+    param_file.write("xori      = 0\n")
+    param_file.write("yori      = 0\n")
+    param_file.write("thetamin   225\n")
+    param_file.write("thetamax   315\n")
+    param_file.write("dtheta     90\n")
+    param_file.write("thetanaut  1\n")
+    param_file.write("\n")
+    param_file.write("%% Initial conditions \n")
+    param_file.write("zs0       = 1.0\n")
+    param_file.write("\n")
+    param_file.write("%% Model time \n")
+    param_file.write("tstop     = 21600\n")
+    param_file.write("tintg     = 10\n")
+    param_file.write("\n")
+    param_file.write("%% Wave boundary condition parameters \n")
+    param_file.write("instat    = jons\n")
+    param_file.write("\n")
+    param_file.write("%% Wave-spectrum boundary condition parameters \n")
+    param_file.write("bcfile    = %s\n" % storm_parameter_path)
+    param_file.write("rt        = 1800\n")
+    param_file.write("dtbc      = 1\n")
+    param_file.write("\n")
+    param_file.write("%% Output variables \n")
+    param_file.write("\n")
+    param_file.write("%% Vegetation (added by SMV)\n")
+    param_file.write("\n")
+    param_file.write("vegetation = 1\n")
+    param_file.write("veggiefile = %s\n" % veggiefile_path)
+    param_file.write("veggiemapfile = %s\n" % veggie_grid_path)
+    param_file.write("morphology = 0\n")
+    param_file.write("nonh = 1\n")
+    param_file.write("swave = 0\n")
+    param_file.write("wind = 1\n")
+    param_file.write("windv = 30.0\n")
+    param_file.write("windth = 270\n")
+    param_file.write("nglobalvar = 3\n")
+    param_file.write("zs\n")
+    param_file.write("zb\n")
+    param_file.write("hh\n")
+    param_file.close()
 
 
 def _make_shore_kernel(kernel_path):
