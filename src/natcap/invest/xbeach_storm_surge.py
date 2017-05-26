@@ -79,7 +79,7 @@ def execute(args):
         args['onshore_depth_threshold'] (float): the depth (or elevation) at
             which to cutoff the profile extractor onshore.
         args['offshore_depth_threshold'] (float): the depth at which to
-            cutoffthe profile extractor sample length.
+            cutoff the profile extractor sample length.
         args['max_profile_length'] (float): the maximum length of a profile
             ray that will otherwise override the `args['*_depth_threshold']`
             values.
@@ -309,20 +309,14 @@ def execute(args):
             # initialize to crazy bounding box so test for bounds fails
             clipped_bathymetry_block = None
             sample_points = []
+            first_point_added = False
             for direction_scale in [-1, 1]:
                 window_bounding_box = [1, 1, -1, -1]
                 current_point = shore_point
-
+                distance_travelled = 0.0
                 while True:
-                    # test if point outside  the max profile bounding box
-                    # break if so because we've gone too far
-                    if (current_point[0] < profile_bounding_box[0] or
-                            current_point[0] > profile_bounding_box[2] or
-                            current_point[1] < profile_bounding_box[1] or
-                            current_point[1] > profile_bounding_box[3]):
-                        break
-
-                    # test if point outside bounding box and if so load a
+                    # test if point outside clipped bathymetry bounding box
+                    # and if so load a
                     # new bounding box
                     if (current_point[0] < window_bounding_box[0] or
                             current_point[0] > window_bounding_box[2] or
@@ -433,7 +427,12 @@ def execute(args):
                     # append the current point and its interpolated depth
                     interpolated_depth = interp_fn(
                         current_point[1], current_point[0])[0, 0]
-                    sample_points.append((current_point, interpolated_depth))
+
+                    if distance_travelled > 0 or not first_point_added:
+                        sample_points.append(
+                            (distance_travelled * direction_scale,
+                             current_point, interpolated_depth))
+                        first_point_added = True
                     if (
                             interpolated_depth >=
                             float(args['onshore_depth_threshold']) or
@@ -470,18 +469,27 @@ def execute(args):
                         direction_x * step_size * direction_scale,
                         current_point[1] +
                         direction_y * step_size * direction_scale)
+                    distance_travelled += step_size
+                    if distance_travelled > float(args['max_profile_length']):
+                        # we're done if we travelled too far
+                        break
 
             clipped_bathymetry_block = None
             clipped_bathymetry_band = None
             clipped_bathymetry_raster = None
 
-            for (point_x, point_y), depth in sample_points:
+            for distance, (point_x, point_y), depth in sample_points:
                 point_feature = ogr.Feature(sample_points_layer_defn)
                 point_geometry = ogr.Geometry(ogr.wkbPoint)
                 point_geometry.AddPoint(point_x, point_y)
                 point_feature.SetGeometry(point_geometry)
                 point_feature.SetField('i_depth', float(depth))
+                point_feature.SetField('s_dist', float(distance))
                 sample_points_layer.CreateFeature(point_feature)
+
+            sample_points_vector.SyncToDisk()
+            sample_points_layer = None
+            sample_points_vector = None
 
             """sampled_depth_array = []
             distance_array = []
@@ -549,34 +557,25 @@ def execute(args):
                         habitat_geometry_name_list.append(
                             (preped_shapely_geom, habitat_name))
                 profile_table.write('\n')
-                sys.exit()
 
-                for sample_point, samp_depth, smooth_depth, dist in zip(
-                        sample_points_layer, sampled_depth_array,
-                        smoothed_depth_array, distance_array):
-
+                for dist, (point_x, point_y), samp_depth in sorted(
+                        sample_points):
                     habitat_crossing = [0] * len(habitat_name_list)
-                    sample_point_geometry = sample_point.GetGeometryRef()
+                    point_geometry = ogr.Geometry(ogr.wkbPoint)
+                    point_geometry.AddPoint(point_x, point_y)
                     for habitat_geometry, habitat_name in \
                             habitat_geometry_name_list:
                         shapely_point = shapely.wkb.loads(
-                            sample_point_geometry.ExportToWkb())
+                            point_geometry.ExportToWkb())
                         if habitat_geometry.contains(shapely_point):
                             habitat_crossing[
                                 habitat_name_list.index(habitat_name)] = 1
 
-                    x_coord = sample_point_geometry.GetX()
-                    y_coord = sample_point_geometry.GetY()
                     profile_table.write(
-                        '%f,%f,%f' % (dist, samp_depth, smooth_depth))
+                        '%f,%f' % (dist, samp_depth))
                     for crossing_value in habitat_crossing:
                         profile_table.write(',%d' % crossing_value)
                     profile_table.write('\n')
-                    sample_point.SetField('i_depth', float(smooth_depth))
-                    sample_points_layer.SetFeature(sample_point)
-            sample_points_layer.SyncToDisk()
-            sample_points_layer = None
-            sample_points_vector = None
 
 
 def _make_shore_kernel(kernel_path):
