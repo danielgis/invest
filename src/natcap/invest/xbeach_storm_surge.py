@@ -1,4 +1,6 @@
 """InVEST XBeach Storm Surge model."""
+import stat
+import subprocess
 import shutil
 import os
 import logging
@@ -116,6 +118,8 @@ def execute(args):
                 gammajsp   =     3.3000
                 s          =    20.0000
                 fnyq       =     1.0000
+        args['xbeach_binary_path'] (string): path to XBeach executable.  It's
+            used as a system call-through.
 
     Returns:
         None.
@@ -635,11 +639,15 @@ def execute(args):
                     except ValueError:
                         # no habitat in this sample
                         veggiemap_file.write('0')
-                for file in [
+                for xbeach_file in [
                         x_grid_file, y_grid_file, bed_grid_file,
                         veggiemap_file]:
-                    file.write('NaN')
-                    file.close()
+                    xbeach_file.write('NaN')
+                    xbeach_file.close()
+                del x_grid_file
+                del y_grid_file
+                del bed_grid_file,
+                del veggiemap_file
             parameter_file_path = os.path.join(
                 xbeach_workspace_path, _PARAMETERFILE_FILE_PATTERN)
             n_points = len(sample_points)
@@ -656,6 +664,17 @@ def execute(args):
                 os.path.basename(xbeach_storm_parameter_path),
                 os.path.basename(veggiefile_path),
                 os.path.basename(veggiemap_path))
+
+            if ('xbeach_binary_path' in args and
+                    os.path.exists(args['xbeach_binary_path'])):
+                #old_wd = os.getcwd()
+                #os.chdir(xbeach_workspace_path)
+                #LOGGER.info(os.getcwd())
+                os.chmod(xbeach_workspace_path, stat.S_IWRITE)
+                process = subprocess.Popen(
+                    [args['xbeach_binary_path']], cwd=xbeach_workspace_path)
+                process.wait()
+                #os.chdir(old_wd)
 
 
 def _write_xbeach_parameter_file(

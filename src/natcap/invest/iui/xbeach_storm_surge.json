@@ -12,6 +12,15 @@
       "type": "list",
       "elements": [
         {
+          "id": "xbeach_binary_path",
+          "args_id": "xbeach_binary_path",
+          "type": "file",
+          "label": "Path to XBeach Executable (.exe file)",
+          "defaultValue": "",
+          "required": false,
+          "helpText": "This is a path to the XBeach binary executable, if present the model will run XBeach on each of the profiles' generated XBeach files.  If absent, the model terminates after making the parameter files."
+        },
+        {
           "id": "workspace",
           "args_id": "workspace_dir",
           "type": "folder",
