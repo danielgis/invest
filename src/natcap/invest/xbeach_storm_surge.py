@@ -45,8 +45,8 @@ _PROFILE_TABLE_FILE_PATTERN = 'profile_table_%s%s.csv'
 _X_GRID_FILE_PATTERN = 'x_%s%s.grd'
 _Y_GRID_FILE_PATTERN = 'y_%s%s.grd'
 _BED_GRID_FILE_PATTERN = 'bed_%s%s.grd'
-
-
+_VEGGIE_GRID_FILE_PATTERN = 'veggie_%s%s.grd'
+_VEGGIEFILE_FILE_PATTERN = 'veggiefile_%s%s.txt'
 _REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
 _HABITAT_IDENTIFIER_FIELDNAME = 'hab_type'
 
@@ -93,6 +93,15 @@ def execute(args):
             will be included in the profile results.  Must contain the field
             name _HABITAT_IDENTIFIER_FIELDNAME to identify the potential
             habitat IDs for reporting.
+        args['habitat_parameter_dir'] (string): path to a directory that
+            containts [HABITAT_NAME].txt files corresponding to the habitat
+            names provided in args['habitat_vector_path'].  The directory
+            contains .txt files matching the values in the 'hab_type' fields
+            of the habitat layer that represent biophysical properties of the
+            habitat types.  Each file contains attributes for its
+            corresponding habitat's morphology including number of vertical
+            sections (N), canopy density (Cd), stem diameter (ah), stem
+            height, and drag coefficient (bv).
 
     Returns:
         None.
@@ -559,6 +568,15 @@ def execute(args):
                         profile_table.write(',%d' % crossing_value)
                     profile_table.write('\n')
 
+            # write out the file that lists the habitats in the order they're
+            # reported in.
+            veggiefile_path = os.path.join(
+                args['workspace_dir'], _VEGGIEFILE_FILE_PATTERN % (
+                    point_name, file_suffix))
+            veggiefile_file = open(veggiefile_path, 'w')
+            for habitat in habitat_name_list:
+                veggiefile_file.write(os.path.join(
+                    args['habitat_parameter_dir'], '%s.txt\n' % habitat))
             with open(f_reg['profile_table'][point_name],
                       'r') as profile_table:
                 profile_table.readline()  # toss the first line
@@ -571,9 +589,13 @@ def execute(args):
                 bed_grid_path = os.path.join(
                     args['workspace_dir'], _BED_GRID_FILE_PATTERN % (
                         point_name, file_suffix))
+                veggiemap_path = os.path.join(
+                    args['workspace_dir'], _VEGGIE_GRID_FILE_PATTERN % (
+                        point_name, file_suffix))
                 x_grid_file = open(x_grid_path, 'w')
                 y_grid_file = open(y_grid_path, 'w')
                 bed_grid_file = open(bed_grid_path, 'w')
+                veggiemap_file = open(veggiemap_path, 'w')
                 first = True
                 for line in profile_table:
                     line_values = [
@@ -583,13 +605,21 @@ def execute(args):
                         x_grid_file.write(',')
                         y_grid_file.write(',')
                         bed_grid_file.write(',')
+                        veggiemap_file.write(',')
                     first = False
                     x_grid_file.write('%f' % line_values[0])
                     y_grid_file.write('0')
-                    bed_grid_file.write('%f' % line_values[1])
+                    try:
+                        # write the first index we see, we can only write one
+                        veggiemap_file.write('%d' % (
+                            line_values[2:].index(1) + 1))
+                    except ValueError:
+                        # no habitat in this sample
+                        veggiemap_file.write('0')
                 x_grid_file.close()
                 y_grid_file.close()
                 bed_grid_file.close()
+                veggiemap_file.close()
 
 
 def _make_shore_kernel(kernel_path):
