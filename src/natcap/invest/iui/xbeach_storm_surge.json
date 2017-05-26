@@ -76,6 +76,15 @@
           "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (N), canopy density (Cd), stem diameter (ah), stem height, and drag coefficient (bv)."
         },
         {
+          "id": "storm_parameter_path",
+          "args_id": "storm_parameter_path",
+          "type": "file",
+          "label": "Storm Parameter File (Text File)",
+          "defaultValue": "../storm_surge/jonswap.txt",
+          "required": true,
+          "helpText": "File characterizing the storm. A sample file is provided with the InVEST distribution."
+        },
+        {
           "id": "sea_bed_depth",
           "args_id": "sea_bed_depth",
           "type": "text",
