@@ -102,6 +102,14 @@ def execute(args):
             corresponding habitat's morphology including number of vertical
             sections (N), canopy density (Cd), stem diameter (ah), stem
             height, and drag coefficient (bv).
+        args['storm_parameter_path'] (string): path to storm parameter file
+            for XBeach.  Example contents below:
+                Hm0        =     7.0000
+                Tp         =     10.000
+                mainang    =   270.0000
+                gammajsp   =     3.3000
+                s          =    20.0000
+                fnyq       =     1.0000
 
     Returns:
         None.
@@ -449,11 +457,6 @@ def execute(args):
                             interpolated_depth <=
                             float(args['offshore_depth_threshold'])):
                         # we're too high or too low, okay to quit
-                        LOGGER.debug(
-                            '%s, %s, %s',
-                            interpolated_depth,
-                            float(args['onshore_depth_threshold']),
-                            float(args['offshore_depth_threshold']))
                         break
                     step_size = None
                     if interpolated_depth >= float(args['nearshore_depth']):
@@ -471,7 +474,6 @@ def execute(args):
                                 1 - interp_parameter) +
                             float(args['offshore_step_size']) * (
                                 interp_parameter))
-                        LOGGER.debug(step_size)
 
                     # udpate to next sample step
                     current_point = (
