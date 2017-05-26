@@ -625,7 +625,7 @@ def execute(args):
                     # format is x, depth, *habitat_overlap
                     # index 0 is the distance along the ray
                     x_grid_file.write('%f,' % line_values[0])
-                    y_grid_file.write('0')
+                    y_grid_file.write('0,')
                     # index 1 is the height of the bathymetry
                     bed_grid_file.write('%f,' % line_values[1])
                     try:
