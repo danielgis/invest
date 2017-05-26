@@ -97,10 +97,10 @@
           "helpText": "The step size to use when sampling any points on the bathemetry layer that are deeper than the offshore depth."
         },
         {
-          "id": "nearshore_height",
-          "args_id": "nearshore_height",
+          "id": "nearshore_depth",
+          "args_id": "nearshore_depth",
           "type": "text",
-          "label": "Nearshore height (m)",
+          "label": "Nearshore depth (m)",
           "defaultValue": "8.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
