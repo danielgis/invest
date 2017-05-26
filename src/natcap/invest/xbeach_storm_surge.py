@@ -41,8 +41,11 @@ _CLIPPED_BATHYMETRY_FILE_PATTERN = os.path.join(
 # Replacement pattern for clipped bathymetry is (point_name, file_suffix)
 _SAMPLE_POINTS_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'sample_points_%s%s.shp')
+# Replacement pattern for profile table is (point_name, file_suffix)
+_PROFILE_TABLE_FILE_PATTERN = 'profile_table_%s%s.csv'
 
 _REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
+_HABITAT_IDENTIFIER_FIELDNAME = 'hab_type'
 
 # Masks are 0 or 1, so 127 is a good value for a signed or unsigned byte
 _MASK_NODATA = 127
@@ -82,9 +85,11 @@ def execute(args):
             values.
         args['representative_point_vector_path'] (string): Path to a point
             vector file that contains points from which to sample bathymetry.
-        args['habitat_vector_directory_path'] (list): Path to a directory
+        args['habitat_vector_path'] (list): Path to a polygon vector that
             that contains habitat layers.  The presence of overlap/no overlap
-            will be included in the profile results.
+            will be included in the profile results.  Must contain the field
+            name _HABITAT_IDENTIFIER_FIELDNAME to identify the potential
+            habitat IDs for reporting.
 
     Returns:
         None.
@@ -336,8 +341,8 @@ def execute(args):
                             clipped_bathymetry_info['block_size'][0],
                             current_point_coords[1] /
                             clipped_bathymetry_info['block_size'][1]]
-                        # make raster pixel bounds to get an efficient ReadAsArray
-                        # call, format is: [minx, miny, maxx, maxy]
+                        # make raster pixel bounds to get an efficient
+                        # ReadAsArray call, format: [minx, miny, maxx, maxy]
                         raster_window_bounds = [
                             block_index[0] *
                             clipped_bathymetry_info['block_size'][0],
@@ -427,23 +432,48 @@ def execute(args):
 
                     # append the current point and its interpolated depth
                     interpolated_depth = interp_fn(
-                        current_point[1], current_point[0])
+                        current_point[1], current_point[0])[0, 0]
                     sample_points.append((current_point, interpolated_depth))
+                    if (
+                            interpolated_depth >=
+                            float(args['onshore_depth_threshold']) or
+                            interpolated_depth <=
+                            float(args['offshore_depth_threshold'])):
+                        # we're too high or too low, okay to quit
+                        LOGGER.debug(
+                            '%s, %s, %s',
+                            interpolated_depth,
+                            float(args['onshore_depth_threshold']),
+                            float(args['offshore_depth_threshold']))
+                        break
+                    step_size = None
+                    if interpolated_depth >= float(args['nearshore_depth']):
+                        step_size = float(args['nearshore_step_size'])
+                    elif interpolated_depth <= float(args['offshore_depth']):
+                        step_size = float(args['offshore_step_size'])
+                    else:
+                        interp_parameter = (
+                            interpolated_depth -
+                            float(args['nearshore_depth'])) / (
+                            float(args['offshore_depth']) -
+                            float(args['nearshore_depth']))
+                        step_size = (
+                            float(args['nearshore_step_size']) * (
+                                1 - interp_parameter) +
+                            float(args['offshore_step_size']) * (
+                                interp_parameter))
+                        LOGGER.debug(step_size)
 
                     # udpate to next sample step
                     current_point = (
                         current_point[0] +
-                        direction_x * float(args['nearshore_step_size']) *
-                        direction_scale,
+                        direction_x * step_size * direction_scale,
                         current_point[1] +
-                        direction_y * float(args['nearshore_step_size']) *
-                        direction_scale)
+                        direction_y * step_size * direction_scale)
 
             clipped_bathymetry_block = None
             clipped_bathymetry_band = None
             clipped_bathymetry_raster = None
-
-            LOGGER.debug(sample_points)
 
             for (point_x, point_y), depth in sample_points:
                 point_feature = ogr.Feature(sample_points_layer_defn)
@@ -453,105 +483,7 @@ def execute(args):
                 point_feature.SetField('i_depth', float(depth))
                 sample_points_layer.CreateFeature(point_feature)
 
-            sys.exit()
-
-            sample_points_layer.SyncToDisk()
-            if 'profile_lines' not in f_reg:
-                f_reg['profile_lines'] = {}
-            f_reg['profile_lines'][point_name] = os.path.join(
-                profile_work_dir, 'profile_line_%s_%s.shp' % (
-                    file_suffix, point_name))
-            if os.path.exists(f_reg['profile_lines'][point_name]):
-                os.remove(f_reg['profile_lines'][point_name])
-            profile_lines_vector = esri_driver.CreateDataSource(
-                f_reg['profile_lines'][point_name])
-            profile_lines_layer = profile_lines_vector.CreateLayer(
-                'profile_lines_%s' % point_name, srs=shore_points_srs,
-                geom_type=ogr.wkbLineString)
-            profile_lines_layer_defn = profile_lines_layer.GetLayerDefn()
-            line_feature = ogr.Feature(profile_lines_layer_defn)
-            profile_line_geometry = ogr.Geometry(ogr.wkbLineString)
-            profile_line_geometry.AddPoint(
-                sample_point_list[0][0], sample_point_list[0][1])
-            profile_line_geometry.AddPoint(
-                sample_point_list[-1][0], sample_point_list[-1][1])
-            line_feature.SetGeometry(profile_line_geometry)
-            profile_lines_layer.CreateFeature(line_feature)
-            profile_lines_layer.SyncToDisk()
-            # extent is xmin, xmax, ymin, ymax
-            extent = profile_lines_layer.GetExtent()
-
-            # always want to round up on the max and round down on the min
-            # reverse last two because y coord moves up while pixels move down
-            extent_in_pixel_coords = (
-                int((extent[0] - shore_geotransform[0]) / shore_geotransform[1]) - 1,
-                int(round(0.5 + (extent[1] - shore_geotransform[0]) /
-                          shore_geotransform[1])) + 1,
-                int(((extent[3] - shore_geotransform[3]) /
-                     shore_geotransform[5])) - 1,
-                int(round(0.5+(extent[2] - shore_geotransform[3]) /
-                          shore_geotransform[5])) + 1)
-
-            bounding_box_point = ogr.Geometry(ogr.wkbLineString)
-            bounding_box_point.AddPoint(extent[0], extent[2])
-            bounding_box_point.AddPoint(extent[0], extent[3])
-            bounding_box_point.AddPoint(extent[1], extent[3])
-            bounding_box_point.AddPoint(extent[1], extent[2])
-            line_feature.SetGeometry(bounding_box_point)
-            profile_lines_layer.CreateFeature(line_feature)
-
-            offset_dict = {
-                'xoff': extent_in_pixel_coords[0],
-                'yoff': extent_in_pixel_coords[2],
-                'win_xsize': (
-                    extent_in_pixel_coords[1]-extent_in_pixel_coords[0]),
-                'win_ysize': (
-                    extent_in_pixel_coords[3]-extent_in_pixel_coords[2]),
-            }
-            for offset, winsize in [
-                    ('xoff', 'win_xsize'), ('yoff', 'win_ysize')]:
-                if offset_dict[offset] < 0:
-                    # this works because offset will be negative
-                    offset_dict[winsize] += offset_dict[offset]
-                    LOGGER.error(
-                        "Profile sample outside of bathymetry raster, "
-                        "results will be clipped to edge.")
-                    offset_dict[offset] = 0
-            # now check if window is too large
-            for offset, winsize, rastersize in [
-                    ('xoff', 'win_xsize', bathy_cols),
-                    ('yoff', 'win_ysize', bathy_rows)]:
-                if offset_dict[offset] + offset_dict[winsize] >= rastersize:
-                    # this works because offset will be negative
-                    offset_dict[winsize] = rastersize - offset_dict[offset]
-                    LOGGER.error(
-                        "Profile sample outside of bathymetry raster, "
-                        "results will be clipped to edge.")
-
-            profile_lines_layer = None
-            profile_lines_vector = None
-
-            clipped_bathymetry_array = bathymetry_band.ReadAsArray(
-                **offset_dict)
-            x_coordinates = numpy.arange(clipped_bathymetry_array.shape[1])
-            x_coordinates = (
-                shore_geotransform[0] + (
-                    x_coordinates + offset_dict['xoff'] + 0.5) *
-                shore_geotransform[1])
-            y_coordinates = numpy.arange(clipped_bathymetry_array.shape[0])
-            # reverse the y coordinates so they are increasing
-            y_coordinates = numpy.flipud(
-                shore_geotransform[3] + (
-                    y_coordinates + offset_dict['yoff'] + 0.5) *
-                shore_geotransform[5])
-            # reverse the rows in the array so they match y coordinates
-            clipped_bathymetry_array = numpy.flipud(clipped_bathymetry_array)
-
-            interp_fn = scipy.interpolate.RectBivariateSpline(
-                y_coordinates, x_coordinates, clipped_bathymetry_array,
-                kx=1, ky=1)
-
-            sampled_depth_array = []
+            """sampled_depth_array = []
             distance_array = []
             for sample_point in sample_points_layer:
                 sample_point_geometry = sample_point.GetGeometryRef()
@@ -568,12 +500,12 @@ def execute(args):
             sampled_depth_array = numpy.array(sampled_depth_array)
             smoothed_depth_array = scipy.signal.savgol_filter(
                 sampled_depth_array,
-                (sampled_depth_array.size/4) * 2 - 1, 2)
+                (sampled_depth_array.size/4) * 2 - 1, 2)"""
 
             if 'profile_table' not in f_reg:
                 f_reg['profile_table'] = {}
             f_reg['profile_table'][point_name] = os.path.join(
-                args['workspace_dir'], 'profile_table_%s_%s.csv' % (
+                args['workspace_dir'], _PROFILE_TABLE_FILE_PATTERN % (
                     point_name, file_suffix))
 
             with open(f_reg['profile_table'][point_name], 'w'
@@ -582,41 +514,43 @@ def execute(args):
                     'distance (m),depth (m),smoothed depth (m)')
                 habitat_name_list = []
                 habitat_geometry_name_list = []
-                for path_name_pair in args['habitat_vector_path_list']:
-                    habitat_vector = ogr.Open(path_name_pair[0])
-                    LOGGER.info("Parsing habitat layer %s", path_name_pair[0])
-                    n_layers = habitat_vector.GetLayerCount()
-                    for layer_index, habitat_layer in enumerate(
-                            habitat_vector):
+                habitat_vector = ogr.Open(args['habitat_vector_path'])
+                LOGGER.info(
+                    "Parsing habitat layer %s", args['habitat_vector_path'])
+                n_layers = habitat_vector.GetLayerCount()
+                for layer_index, habitat_layer in enumerate(
+                        habitat_vector):
+                    LOGGER.info(
+                        "Working on habitat layer %d of %d in %s",
+                        layer_index+1, n_layers, args['habitat_vector_path'])
+                    n_features = habitat_layer.GetFeatureCount()
+                    for feature_index, habitat_feature in enumerate(
+                            habitat_layer):
                         LOGGER.info(
-                            "Working on habitat layer %d of %d in %s",
-                            layer_index+1, n_layers, path_name_pair[0])
-                        n_features = habitat_layer.GetFeatureCount()
-                        for feature_index, habitat_feature in enumerate(
-                                habitat_layer):
-                            LOGGER.info(
-                                "Analyzing feature %d of %d", feature_index+1,
-                                n_features)
-                            habitat_feature_geom = (
-                                habitat_feature.GetGeometryRef())
-                            # sometimes there's a feature, but no geometry
-                            # it's a valid shapefile still.
-                            if habitat_feature_geom is None:
-                                continue
-                            habitat_name = habitat_feature.GetField(
-                                path_name_pair[1])
-                            if habitat_name not in habitat_name_list:
-                                habitat_name_list.append(habitat_name)
-                                profile_table.write(',%s' % habitat_name)
+                            "Analyzing feature %d of %d", feature_index+1,
+                            n_features)
+                        habitat_feature_geom = (
+                            habitat_feature.GetGeometryRef())
+                        # sometimes there's a feature, but no geometry
+                        # it's a valid shapefile still.
+                        if habitat_feature_geom is None:
+                            continue
+                        habitat_name = habitat_feature.GetField(
+                            _HABITAT_IDENTIFIER_FIELDNAME)
+                        if habitat_name not in habitat_name_list:
+                            habitat_name_list.append(habitat_name)
+                            profile_table.write(',%s' % habitat_name)
 
-                            shapely_geom = shapely.wkb.loads(
-                                habitat_feature_geom.ExportToWkb())
-                            preped_shapely_geom = (
-                                shapely.prepared.prep(shapely_geom))
+                        shapely_geom = shapely.wkb.loads(
+                            habitat_feature_geom.ExportToWkb())
+                        preped_shapely_geom = (
+                            shapely.prepared.prep(shapely_geom))
 
-                            habitat_geometry_name_list.append(
-                                (preped_shapely_geom, habitat_name))
+                        habitat_geometry_name_list.append(
+                            (preped_shapely_geom, habitat_name))
                 profile_table.write('\n')
+                sys.exit()
+
                 for sample_point, samp_depth, smooth_depth, dist in zip(
                         sample_points_layer, sampled_depth_array,
                         smoothed_depth_array, distance_array):
