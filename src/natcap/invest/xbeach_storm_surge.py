@@ -236,8 +236,6 @@ def execute(args):
                 'sample_points_%s' % point_name, srs=shore_points_srs,
                 geom_type=ogr.wkbPoint)
             sample_points_layer.CreateField(
-                ogr.FieldDefn("s_depth", ogr.OFTReal))
-            sample_points_layer.CreateField(
                 ogr.FieldDefn("i_depth", ogr.OFTReal))
             sample_points_layer.CreateField(
                 ogr.FieldDefn("s_dist", ogr.OFTReal))
@@ -491,35 +489,16 @@ def execute(args):
             sample_points_layer = None
             sample_points_vector = None
 
-            """sampled_depth_array = []
-            distance_array = []
-            for sample_point in sample_points_layer:
-                sample_point_geometry = sample_point.GetGeometryRef()
-                x_coord = sample_point_geometry.GetX()
-                y_coord = sample_point_geometry.GetY()
-                step_distance = sample_point.GetField('s_dist')
-                distance_array.append(step_distance)
-                sampled_depth = interp_fn(y_coord, x_coord)
-                sampled_depth_array.append(sampled_depth[0][0])
-                sample_point.SetField(
-                    's_depth', float(sampled_depth_array[-1]))
-                sample_points_layer.SetFeature(sample_point)
-            sample_points_layer.ResetReading()
-            sampled_depth_array = numpy.array(sampled_depth_array)
-            smoothed_depth_array = scipy.signal.savgol_filter(
-                sampled_depth_array,
-                (sampled_depth_array.size/4) * 2 - 1, 2)"""
-
             if 'profile_table' not in f_reg:
                 f_reg['profile_table'] = {}
             f_reg['profile_table'][point_name] = os.path.join(
                 args['workspace_dir'], _PROFILE_TABLE_FILE_PATTERN % (
                     point_name, file_suffix))
 
-            with open(f_reg['profile_table'][point_name], 'w'
-                     ) as profile_table:
+            with open(f_reg['profile_table'][point_name],
+                      'w') as profile_table:
                 profile_table.write(
-                    'distance (m),depth (m),smoothed depth (m)')
+                    'distance (m),depth (m)')
                 habitat_name_list = []
                 habitat_geometry_name_list = []
                 habitat_vector = ogr.Open(args['habitat_vector_path'])
