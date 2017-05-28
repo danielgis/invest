@@ -124,14 +124,6 @@ def execute(args):
     Returns:
         None.
     """
-    #xbeach_workspace_path = os.path.join(
-    #    args['workspace_dir'], _XBEACH_WORKSPACE_DIRPATTERN % (
-    #        'a', '_foo'))
-    #process = subprocess.Popen(
-    #    [args['xbeach_binary_path']],
-    #    cwd=xbeach_workspace_path)
-    #process.wait()
-    #sys.exit()
     max_profile_length = float(args['max_profile_length'])
     # TODO: ensure that representative points have an _REPRESENTATIVE_POINT_ID_FIELDNAME field
 
@@ -601,7 +593,7 @@ def execute(args):
             veggiefile_path = os.path.join(
                 xbeach_workspace_path, _VEGGIEFILE_FILE_PATTERN % (
                     point_name, file_suffix))
-            veggiefile_file = open(veggiefile_path, 'w')
+            veggiefile_file = open(veggiefile_path, 'w', 0)
             for habitat in habitat_name_list:
                 base_habitat_path = os.path.join(
                     args['habitat_parameter_dir'], '%s.txt' % habitat)
@@ -627,10 +619,10 @@ def execute(args):
                 veggiemap_path = os.path.join(
                     xbeach_workspace_path, _VEGGIE_GRID_FILE_PATTERN % (
                         point_name, file_suffix))
-                x_grid_file = open(x_grid_path, 'w')
-                y_grid_file = open(y_grid_path, 'w')
-                bed_grid_file = open(bed_grid_path, 'w')
-                veggiemap_file = open(veggiemap_path, 'w')
+                x_grid_file = open(x_grid_path, 'w', 0)
+                y_grid_file = open(y_grid_path, 'w', 0)
+                bed_grid_file = open(bed_grid_path, 'w', 0)
+                veggiemap_file = open(veggiemap_path, 'w', 0)
                 for line in profile_table:
                     line_values = [
                         float(x) for x in line.split(',')]
@@ -651,7 +643,6 @@ def execute(args):
                         x_grid_file, y_grid_file, bed_grid_file,
                         veggiemap_file]:
                     xbeach_file.write('NaN')
-                    xbeach_file.flush()
                     xbeach_file.close()
                 del x_grid_file
                 del y_grid_file
@@ -676,18 +667,15 @@ def execute(args):
 
             if ('xbeach_binary_path' in args and
                     os.path.exists(args['xbeach_binary_path'])):
-                #old_wd = os.getcwd()
-                #os.chdir(xbeach_workspace_path)
-                #LOGGER.info(os.getcwd())
-                os.chmod(xbeach_workspace_path, stat.S_IWRITE)
-                shutil.copyfile(
-                    args['xbeach_binary_path'], os.path.join(
-                        xbeach_workspace_path, 'xbeach.exe'))
+
+                #xbeach_workspace_path = os.path.join(
+                #    args['workspace_dir'], _XBEACH_WORKSPACE_DIRPATTERN % (
+                #        'a', '_foo'))
+                #xbeach_workspace_path = r"C:\Users\rpsharp\Documents\xbeach_storm_surge_workspac88\xbeach_workspacea_foo"
                 process = subprocess.Popen(
                     [args['xbeach_binary_path']],
                     cwd=xbeach_workspace_path)
                 process.wait()
-                #os.chdir(old_wd)
 
 
 def _write_xbeach_parameter_file(
