@@ -6,6 +6,7 @@ import os
 import logging
 from datetime import datetime
 
+import matplotlib.pyplot
 import scipy.signal
 import scipy.ndimage.filters
 import scipy.interpolate
@@ -57,6 +58,7 @@ _PARAMETERFILE_FILE_PATTERN = 'params.txt'
 
 _REPRESENTATIVE_POINT_ID_FIELDNAME = 'id'
 _HABITAT_IDENTIFIER_FIELDNAME = 'hab_type'
+_MAX_WAVE_HEIGHT_FIELDNAME = 'max_wav_h'
 
 # Masks are 0 or 1, so 127 is a good value for a signed or unsigned byte
 _MASK_NODATA = 127
@@ -269,6 +271,8 @@ def execute(args):
                 ogr.FieldDefn("i_depth", ogr.OFTReal))
             sample_points_layer.CreateField(
                 ogr.FieldDefn("s_dist", ogr.OFTReal))
+            sample_points_layer.CreateField(
+                ogr.FieldDefn(_MAX_WAVE_HEIGHT_FIELDNAME, ogr.OFTReal))
             sample_points_layer_defn = sample_points_layer.GetLayerDefn()
 
             representative_point_geometry = (
@@ -683,6 +687,47 @@ def execute(args):
                     [args['xbeach_binary_path']],
                     cwd=xbeach_workspace_path)
                 process.wait()
+
+                zb_path = os.path.join(xbeach_workspace_path, 'zb.dat')
+                zs_path = os.path.join(xbeach_workspace_path, 'zs.dat')
+
+                if os.path.exists(zb_path) and os.path.exists(zs_path):
+                    zb_array = numpy.fromfile(zb_path)
+                    zs_array = numpy.fromfile(zs_path)
+                    timesteps = zs_array.size / n_points
+                    water_level = (
+                        zs_array - zb_array).reshape(timesteps, n_points)
+                    max_water_level = numpy.max(
+                        water_level[timesteps/3:, :], axis=0)
+                    x_steps = numpy.arange(0.0, n_points)
+                    matplotlib.pyplot.clf()
+                    matplotlib.pyplot.plot(x_steps, max_water_level)
+                    matplotlib.pyplot.xlabel('distance (m)')
+                    matplotlib.pyplot.ylabel('wave height (m)')
+                    matplotlib.pyplot.title(
+                        'Max Wave Height for profile %s' % point_name)
+                    matplotlib.pyplot.grid(True)
+                    matplotlib.pyplot.savefig(
+                        os.path.join(
+                            xbeach_workspace_path,
+                            "max_water_level_%s%s.png" % (
+                                point_name, file_suffix)))
+
+                    point_vector = ogr.Open(
+                        f_reg['sample_points'][point_name], 1)
+                    point_layer = point_vector.GetLayer()
+                    for max_height, point_feature in zip(
+                            max_water_level, point_layer):
+                        point_feature.SetField(
+                            _MAX_WAVE_HEIGHT_FIELDNAME, float(max_height))
+                        point_layer.SetFeature(point_feature)
+                    point_vector.SyncToDisk()
+                    point_layer = None
+                    point_vector = None
+                else:
+                    LOGGER.error(
+                        "Can't find xbeach output files, it's possible "
+                        "xbeach crashed on this run.")
 
 
 def _write_xbeach_parameter_file(
