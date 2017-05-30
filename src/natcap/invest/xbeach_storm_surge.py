@@ -600,7 +600,8 @@ def execute(args):
                 target_habitat_path = os.path.join(
                     xbeach_workspace_path,
                     os.path.basename(base_habitat_path))
-                LOGGER.debug("%s, %s" % (base_habitat_path, target_habitat_path))
+                LOGGER.debug("%s, %s" % (
+                    base_habitat_path, target_habitat_path))
                 shutil.copyfile(base_habitat_path, target_habitat_path)
                 veggiefile_file.write('%s.txt\n' % habitat)
 
@@ -623,26 +624,36 @@ def execute(args):
                 y_grid_file = open(y_grid_path, 'w', 0)
                 bed_grid_file = open(bed_grid_path, 'w', 0)
                 veggiemap_file = open(veggiemap_path, 'w', 0)
-                for line in profile_table:
+                for line_index, line in enumerate(profile_table):
                     line_values = [
                         float(x) for x in line.split(',')]
                     # format is x, depth, *habitat_overlap
                     # index 0 is the distance along the ray
-                    x_grid_file.write('%f,' % line_values[0])
-                    y_grid_file.write('0,')
-                    # index 1 is the height of the bathymetry
-                    bed_grid_file.write('%f,' % line_values[1])
+                    x_grid_file.write('%f' % line_values[0])
+                    y_grid_file.write('0')
                     try:
                         # write the first index we see, we can only write one
-                        veggiemap_file.write('%d,' % (
+                        veggiemap_file.write('%d' % (
                             line_values[2:].index(1) + 1))
                     except ValueError:
                         # no habitat in this sample
                         veggiemap_file.write('0')
+                    if line_index < len(sample_points) - 1:
+                        # write commas because they're needed
+                        x_grid_file.write(',')
+                        y_grid_file.write(',')
+                        veggiemap_file.write(',')
+                        # index 1 is the height of the bathymetry
+                        # invert the height to make it depth
+                        bed_grid_file.write('%f,' % (-line_values[1]))
+                    else:
+                        # I think we have to do this on the last bed value?
+                        # that's how the example goes.
+                        bed_grid_file.write('NaN')
                 for xbeach_file in [
                         x_grid_file, y_grid_file, bed_grid_file,
                         veggiemap_file]:
-                    xbeach_file.write('NaN')
+                    # xbeach_file.write('NaN')
                     xbeach_file.close()
                 del x_grid_file
                 del y_grid_file
@@ -665,13 +676,9 @@ def execute(args):
                 os.path.basename(veggiefile_path),
                 os.path.basename(veggiemap_path))
 
+            # Call XBeach on the generated workspace
             if ('xbeach_binary_path' in args and
                     os.path.exists(args['xbeach_binary_path'])):
-
-                #xbeach_workspace_path = os.path.join(
-                #    args['workspace_dir'], _XBEACH_WORKSPACE_DIRPATTERN % (
-                #        'a', '_foo'))
-                #xbeach_workspace_path = r"C:\Users\rpsharp\Documents\xbeach_storm_surge_workspac88\xbeach_workspacea_foo"
                 process = subprocess.Popen(
                     [args['xbeach_binary_path']],
                     cwd=xbeach_workspace_path)
@@ -698,7 +705,7 @@ def _write_xbeach_parameter_file(
     param_file.write("%% Grid parameters \n")
     param_file.write("depfile   = %s\n" % bed_grid_path)
     param_file.write("posdwn    = 0\n")
-    param_file.write("nx        = %d\n" % n_points)
+    param_file.write("nx        = %d\n" % (n_points-1))
     param_file.write("ny        = 0\n")
     param_file.write("alfa      = 0\n")
     param_file.write("vardx     = 1\n")
