@@ -29,11 +29,12 @@ shapeTypes = {0: "Null Shape", 1: "Point", 3: "PolyLine", 5: "Polygon",
 _OUTPUT = {
     'landcover_transition_uri': 'transitioned.tif',
     'override_dataset_uri': 'override.tif',
-    'landcover_htm_uri': 'scenario-output-summary.html'
+    'landcover_htm_uri': 'scenario-output-summary.html',
+    'scenario_uri': 'scenario.tif',
+
 }
 
 _INTERMEDIATE = {
-    'scenario_uri': 'scenario.tif',
     'transition_name': "transition_%i.tif",
     'suitability_name': '%s_%s.tif',
     'normalized_name': '%s_%s_norm.tif',
