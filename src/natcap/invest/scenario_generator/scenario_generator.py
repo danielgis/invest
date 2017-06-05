@@ -784,6 +784,18 @@ def execute(args):
             LOGGER.error(msg)
             raise ValueError(msg)
 
+        if not args["calculate_transition"]:
+            # Raise an error if a transition table has a landcover ID that's not in
+            # the landcover AND "Specify Transitions" is not selected
+            missing_lulc = set(transition_dict.keys()).difference(
+                landcover_count_dict)
+            if len(missing_lulc) > 0:
+                raise ValueError(
+                    "Found these landcover values in the transition table "
+                    "that aren't in the landcover map: %s.  Did you mean to "
+                    "check the 'Specify Transition' option?" % (
+                        str(missing_lulc)))
+
         for cover_id in transition_dict:
             if (transition_dict[cover_id][args["percent_field"]] > 0) and not (
                     cover_id in landcover_count_dict):
