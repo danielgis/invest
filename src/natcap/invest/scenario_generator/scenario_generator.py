@@ -385,8 +385,11 @@ def generate_chart_html(cover_dict, cover_names_dict, workspace_dir):
     temp.append(hainitialnegative)
     haall.append(temp)
 
-    thecharts[0].append(max(hainitiallist))
-    thecharts[0].append(min(hainitiallist))
+    if hainitiallist != []:
+        thecharts[0].append(max(hainitiallist))
+        thecharts[0].append(min(hainitiallist))
+    else:
+        thecharts[0].extend(['N/A'] * 2)
 
     for x in finalcover:
         hafinal = hafinal + str(x) + ","
@@ -397,8 +400,11 @@ def generate_chart_html(cover_dict, cover_names_dict, workspace_dir):
     temp.append(hafinalnegative)
     haall.append(temp)
 
-    thecharts[1].append(max(hafinallist))
-    thecharts[1].append(min(hafinallist))
+    if hafinallist != []:
+        thecharts[1].append(max(hafinallist))
+        thecharts[1].append(min(hafinallist))
+    else:
+        thecharts[1].extend(['N/A'] * 2)
 
     for x in range(len(initialcover)):
         hachange = hachange + str(float(finalcover[x]) -
@@ -422,8 +428,11 @@ def generate_chart_html(cover_dict, cover_names_dict, workspace_dir):
     temp.append(hachangelistnegative)
     haall.append(temp)
 
-    thecharts[2].append(max(hachangelist))
-    thecharts[2].append(min(hachangelist))
+    if hachangelist != []:
+        thecharts[2].append(max(hachangelist))
+        thecharts[2].append(min(hachangelist))
+    else:
+        thecharts[2].extend(['N/A'] * 2)
 
     if thecharts[0][2] > thecharts[1][2]:
         thecharts[1][2] = thecharts[0][2]
@@ -740,7 +749,8 @@ def execute(args):
                      (physical_suitability_weight * suit))
 
     # Validate data
-    if not any([args["calculate_transition"],
+    if not any(["calculate_transition" in args and
+                args["calculate_transition"],
                 args["calculate_factors"],
                 args["override_layer"]]):
         msg = "You must select at least one of the following: specify "\
@@ -755,7 +765,9 @@ def execute(args):
         LOGGER.warn(msg)
 
     transition_dict = {}
-    if args["calculate_transition"] or args["calculate_factors"]:
+    if (
+            ("calculate_transition" in args and
+             args["calculate_transition"]) or args["calculate_factors"]):
         transition_dict = geoprocess.get_lookup_from_table(
             args["transition"],
             args["transition_id"])
@@ -789,7 +801,6 @@ def execute(args):
     # Test if proximity is not defined and raise exception if needed
     if 'calculate_proximity' in args and bool(args['calculate_proximity']):
         if _PROXIMITY_FIELD_ID not in transition_dict.itervalues().next():
-            print transition_dict
             raise ValueError(
                 "Calculate Proximity mode selected, but expected '%s' field "
                 "not found in %s table." % (
@@ -804,7 +815,7 @@ def execute(args):
         # error if same factor twice for same coverage
         pass
 
-    if args["calculate_priorities"]:
+    if "calculate_priorities" in args and args["calculate_priorities"]:
         priorities_dict = calculate_priority(args["priorities_csv_uri"])
 
     # Check geographic extents, projections
@@ -812,7 +823,7 @@ def execute(args):
     suitability_transition_dict = {}
 
     # THIS SHOULD BE OWN FUNCTION
-    if args["calculate_transition"]:
+    if "calculate_transition" in args and args["calculate_transition"]:
         LOGGER.info("Calculating transition...")
         for next_lulc in transition_dict:
             transition_raster_fpath = os.path.join(
@@ -1087,7 +1098,7 @@ def execute(args):
                     cover_id][0][0]
 
     suitability_dict = {}
-    if args["calculate_transition"]:
+    if "calculate_transition" in args and args["calculate_transition"]:
         suitability_dict = suitability_transition_dict
         if args["calculate_factors"]:
             for cover_id in suitability_factors_dict:
@@ -1164,7 +1175,7 @@ def execute(args):
 
     # SHOULD BE OWN FUNCTION
     proximity_dict = {}
-    if args["calculate_proximity"]:
+    if "calculate_proximity" in args and args["calculate_proximity"]:
         LOGGER.info("Calculating proximity.")
         cover_types = transition_dict.keys()
         for cover_id in transition_dict:
@@ -1344,7 +1355,7 @@ def execute(args):
     # THIS SHOULD BE OWN FUNCTION -- also compress if-else into single func
     # identify LULC types undergoing change
     change_list = []
-    if args["calculate_priorities"]:
+    if "calculate_priorities" in args and args["calculate_priorities"]:
         LOGGER.info("Calculating priorities using priority table...")
         for cover_id in transition_dict:
             percent_change = transition_dict[cover_id][args["percent_field"]]
@@ -1418,16 +1429,11 @@ def execute(args):
         if suitability_values[-1] == 0:
             suitability_values.pop(-1)
         for suitability_score in suitability_values:
-            # Check if suitsbility is between 0 and 100 inclusive
-            if abs(suitability_score - 50) > 50:
-                print('suitability_values:', suitability_dict[cover_id])
-                for v in suitability_values:
-                    print v, ' ',
-
+            # Check if suitability is between 0 and 100 inclusive
             assert abs(suitability_score - 50) <= 50, \
                 'Invalid suitability score ' + str(suitability_score)
             if pixels_changed == count:
-                LOGGER.debug("All necessay pixels converted.")
+                LOGGER.debug("All necessary pixels converted.")
                 break
 
             LOGGER.debug(
@@ -1645,8 +1651,11 @@ def execute(args):
 
     cover_names_dict = {}
 
-    transition_dict = geoprocess.get_lookup_from_table(
-        args["transition"], args["transition_id"])
+    transition_dict = {}
+    if "transition" in args["transition"] and args["transition"] != '':
+        transition_dict = geoprocess.get_lookup_from_table(
+            args["transition"], args["transition_id"])
+
     cover_names_dict = {}
     for cover in transition_dict:
         cover_names_dict[cover] = transition_dict[cover]["name"]
@@ -1690,13 +1699,15 @@ def execute(args):
     # Input CSVs
     input_csv_list = []
 
-    if args["calculate_priorities"]:
+    if "calculate_priorities" in args and args["calculate_priorities"]:
         input_csv_list.append((args["priorities_csv_uri"], "Priorities Table"))
 
-    if args["calculate_transition"] or args["calculate_factors"]:
+    if (
+            ("calculate_transition" in args and
+             args["calculate_transition"]) or args["calculate_factors"]):
         input_csv_list.append((args["transition"], "Transition Table"))
 
-    if args["calculate_factors"]:
+    if "calculate_factors" in args and args["calculate_factors"]:
         input_csv_list.append((args["suitability"], "Factors Table"))
 
     htm.write("<h1>Input Tables</h1>")
