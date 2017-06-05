@@ -21,8 +21,12 @@ from natcap.invest.pygeoprocessing_0_3_3 import geoprocessing as geoprocess
 import natcap.invest.pygeoprocessing_0_3_3.testing as pygeotest
 
 
-SAMPLE_DATA = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'invest-data')
+SAMPLE_DATA_DIR = os.path.join(
+    os.path.dirname(__file__), '..', 'data', 'invest-data',
+    'ScenarioGenerator', 'input')
+TEST_DATA_DIR = os.path.join(
+    os.path.dirname(__file__), '..', 'data', 'invest-test-data',
+    'scenario_gen_rule_based')
 
 LOGGER = logging.getLogger('test_scenario_generator')
 
@@ -323,6 +327,41 @@ class UnitTests(unittest.TestCase):
         sg.scenario_generator.filter_fragments(
             input_uri, size, output_uri)
         self.assertEqual(read_raster(output_uri)[0, 1], 0.)
+
+
+    def test_regression(self):
+        """Scenario Generator: regression test with seed 0."""
+        from natcap.invest.scenario_generator import scenario_generator
+        args = {
+            'calculate_constraints': True,
+            'calculate_factors': True,
+            'calculate_priorities': True,
+            'calculate_proximity': True,
+            'calculate_transition': True,
+            'constraints': os.path.join(SAMPLE_DATA_DIR, 'constraints.shp'),
+            'constraints_field': 'protlevel',
+            'factor_inclusion': '0',
+            'landcover': os.path.join(SAMPLE_DATA_DIR, 'landcover.tif'),
+            'override': os.path.join(SAMPLE_DATA_DIR, 'override.shp'),
+            'override_field': '',
+            'override_inclusion': '0',
+            'override_layer': True,
+            'priorities_csv_uri': os.path.join(
+                SAMPLE_DATA_DIR, 'prioritymatrix.csv'),
+            'seed': '0',
+            'suffix': 'seed0',
+            'suitability': os.path.join(
+                SAMPLE_DATA_DIR, 'scenario_suitability_factors.csv'),
+            'suitability_folder': SAMPLE_DATA_DIR,
+            'transition': os.path.join(SAMPLE_DATA_DIR, 'land_attributes.csv'),
+            'weight': 0.5,
+            'workspace_dir': self.args['workspace_dir'],
+        }
+        scenario_generator.execute(args)
+        pygeotest.assert_rasters_equal(
+            os.path.join(self.args['workspace_dir'], 'scenarioseed0.tif'),
+            os.path.join(TEST_DATA_DIR, 'scenarioseed0.tif'))
+
 
     def tearDown(self):
         """Tear Down."""
