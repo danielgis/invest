@@ -48,6 +48,7 @@ _INTERMEDIATE = {
     'adjusted_suitability_name': 'adjusted_suitability_%s.tif'
 }
 
+_PROXIMITY_FIELD_ID = "proximity"
 
 def calculate_weights(array, rounding=4):
     """Create list of priority weights by land-cover class.
@@ -655,7 +656,6 @@ def execute(args):
     args["percent_field"] = "percent change"
     args["area_field"] = "area change"
     args["priority_field"] = "priority"
-    args["proximity_field"] = "proximity"
     args["proximity_weight"] = "0.3"
     args["patch_field"] = "patch ha"
 
@@ -700,8 +700,6 @@ def execute(args):
         physical_suitability_weight = 0.5
 
     # output file names
-    landcover_transition_uri = file_registry['landcover_transition_uri']
-    override_dataset_uri = file_registry['override_dataset_uri']
     landcover_htm_uri = file_registry['landcover_htm_uri']
 
     geoprocess.create_directories([workspace])
@@ -787,6 +785,15 @@ def execute(args):
                 msg = "Cover %i cannot have both an increase by percent and "\
                       "area." % cover_id
                 raise ValueError(msg)
+
+    # Test if proximity is not defined and raise exception if needed
+    if 'calculate_proximity' in args and bool(args['calculate_proximity']):
+        if _PROXIMITY_FIELD_ID not in transition_dict.itervalues().next():
+            print transition_dict
+            raise ValueError(
+                "Calculate Proximity mode selected, but expected '%s' field "
+                "not found in %s table." % (
+                    _PROXIMITY_FIELD_ID, args['transition']))
 
     # Factor parameters validation
     if args["calculate_factors"]:
@@ -1161,14 +1168,14 @@ def execute(args):
         LOGGER.info("Calculating proximity.")
         cover_types = transition_dict.keys()
         for cover_id in transition_dict:
-            if transition_dict[cover_id][args["proximity_field"]] == u'':
+            if transition_dict[cover_id][_PROXIMITY_FIELD_ID] == u'':
                 msg = "Proximity value not provided for lulc_code %i.  Check "\
                       "your land cover transition / attributes table."
                 raise ValueError(msg % cover_id)
-            if transition_dict[cover_id][args["proximity_field"]] > 0 and \
+            if transition_dict[cover_id][_PROXIMITY_FIELD_ID] > 0 and \
                     cover_id in suitability_dict:
                 distance = int(
-                    transition_dict[cover_id][args["proximity_field"]])
+                    transition_dict[cover_id][_PROXIMITY_FIELD_ID])
                 LOGGER.info("Calculating proximity for %i.", cover_id)
                 reclass_dict = dict(zip(cover_types, [1] * len(cover_types)))
                 reclass_dict[cover_id] = 0
