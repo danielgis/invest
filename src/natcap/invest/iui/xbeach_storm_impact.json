@@ -1,9 +1,9 @@
 {
   "id": "window",
-  "label": "XBeach Storm Surge Model",
-  "targetScript": "natcap.invest.xbeach_storm_surge",
-  "modelName": "xbeach_storm_surge",
-  "localDocURI": "../documentation/xbeach_storm_surge.html",
+  "label": "XBeach Storm Impact Model",
+  "targetScript": "natcap.invest.xbeach_storm_impact",
+  "modelName": "xbeach_storm_impact",
+  "localDocURI": "../documentation/xbeach_storm_impact.html",
   "height": 975,
   "width": 700,
   "elements": [
@@ -25,7 +25,7 @@
           "args_id": "workspace_dir",
           "type": "folder",
           "label": "Workspace",
-          "defaultValue": "~/Documents/xbeach_storm_surge_workspace",
+          "defaultValue": "~/Documents/xbeach_storm_impact_workspace",
           "required": true,
           "helpText": "The selected folder is used as the workspace where all intermediate and output files will be written.<br><br>If the selected folder does not exist, it will be created.<br><br><b>If datasets already exist in the selected folder, they will be overwritten.</b>"
         },
@@ -47,7 +47,7 @@
           "args_id": "bathymetry_path",
           "type": "file",
           "label": "Bathymetry Map (Raster)",
-          "defaultValue": "../storm_surge/clipped_claybark_dem.tif",
+          "defaultValue": "../storm_impact/clipped_claybark_dem.tif",
           "required": true,
           "validateAs": {
             "type": "GDAL"
@@ -59,7 +59,7 @@
           "args_id": "representative_point_vector_path",
           "type": "file",
           "label": "Representative Points (Point Vector)",
-          "defaultValue": "../storm_surge/claybark_sample_points.shp",
+          "defaultValue": "../storm_impact/claybark_sample_points.shp",
           "required": true,
           "validateAs": {
             "type": "OGR"
@@ -71,7 +71,7 @@
           "args_id": "habitat_vector_path",
           "type": "file",
           "label": "Habitat Layer File (Polygon Vector)",
-          "defaultValue": "../storm_surge/habitat_layers.shp",
+          "defaultValue": "../storm_impact/habitat_layers.shp",
           "required": true,
           "helpText": "A habitat layer, must contain a field called `hab_type`.  The presence of overlap/no overlap will be included in the profile results."
         },
@@ -80,7 +80,7 @@
           "args_id": "habitat_parameter_dir",
           "type": "folder",
           "label": "Habitat Parameter Directory",
-          "defaultValue": "../storm_surge/habitat_parameter_files",
+          "defaultValue": "../storm_impact/habitat_parameter_files",
           "required": true,
           "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (N), canopy density (Cd), stem diameter (ah), stem height, and drag coefficient (bv)."
         },
@@ -89,7 +89,7 @@
           "args_id": "storm_parameter_path",
           "type": "file",
           "label": "Storm Parameter File (Text File)",
-          "defaultValue": "../storm_surge/jonswap.txt",
+          "defaultValue": "../storm_impact/jonswap.txt",
           "required": true,
           "helpText": "File characterizing the storm. A sample file is provided with the InVEST distribution."
         },
