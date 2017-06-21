@@ -1,4 +1,4 @@
-"""InVEST XBeach Storm Surge model."""
+"""InVEST XBeach Storm Impact model."""
 import stat
 import subprocess
 import shutil
@@ -24,7 +24,7 @@ from . import utils
 logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
 %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 
-LOGGER = logging.getLogger('natcap.invest.xbeach_storm_surge')
+LOGGER = logging.getLogger('natcap.invest.xbeach_storm_impact')
 
 _PROFILE_WORK_DIRECTORY = 'shore_profile_work_directory'
 _TEMPORARY_FILE_DIRECTORY = 'tmp'
@@ -65,7 +65,7 @@ _MASK_NODATA = 127
 
 
 def execute(args):
-    """InVEST XBeach Storm Surge Model.
+    """InVEST XBeach Storm Impact Model.
 
     Parameters:
         args['workspace_dir'] (string): output directory for intermediate,

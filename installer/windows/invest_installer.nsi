@@ -313,6 +313,7 @@ Section "InVEST Tools and ArcGIS toolbox" Section_InVEST_Tools
   CreateShortCut "${SMPATH}\Wave Energy (${ARCHITECTURE}).lnk" "${INVEST_DATA}\invest_wave_energy.bat" "" "${INVEST_ICON}"
   CreateShortCut "${SMPATH}\Wind Energy (${ARCHITECTURE}).lnk" "${INVEST_DATA}\invest_wind_energy.bat" "" "${INVEST_ICON}"
   CreateShortCut "${SMPATH}\Coastal Vulnerability (${ARCHITECTURE}).lnk" "${INVEST_DATA}\invest_coastal_vulnerability.bat" "" "${INVEST_ICON}"
+  CreateShortCut "${SMPATH}\XBeach Storm Impact (${ARCHITECTURE}).lnk" "${INVEST_DATA}\invest_xbeach_storm_impact.bat" "" "${INVEST_ICON}"
 
   CreateDirectory "${COASTALBLUECARBON}"
   CreateShortCut "${COASTALBLUECARBON}\(1) Coastal Blue Carbon Preprocessor (${ARCHITECTURE}).lnk" "${INVEST_DATA}\invest_coastal_blue_carbon_preprocessor.bat" "" "${INVEST_ICON}"
@@ -477,6 +478,7 @@ SectionGroup /e "InVEST Datasets" SEC_DATA
     !insertmacro downloadData "Wave Energy (required to run model)" "WaveEnergy.zip" 831620
     !insertmacro downloadData "Wind Energy (required to run model)" "WindEnergy.zip" 4804
     !insertmacro downloadData "Recreation (optional)" "recreation.zip" 24
+    !insertmacro downloadData "XBeach Storm Impact (optional)" "storm_impact.zip"   3500
   SectionGroupEnd
 
   SectionGroup "Terrestrial Datasets" SEC_TERRESTRIAL_DATA
