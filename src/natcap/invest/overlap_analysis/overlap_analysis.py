@@ -14,8 +14,6 @@ from scipy import ndimage
 
 
 LOGGER = logging.getLogger('natcap.invest.overlap_analysis.overlap_analysis')
-logging.basicConfig(format='%(asctime)s %(name)-15s %(levelname)-8s \
-    %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 
 
 def execute(args):
@@ -655,3 +653,7 @@ def make_indiv_rasters(out_dir, overlap_shape_uris, aoi_raster_uri):
 
     LOGGER.debug("Just made the following URIs %s" % str(raster_uris))
     return raster_uris, raster_names
+
+
+def validate(args, limit_to=None):
+    return []

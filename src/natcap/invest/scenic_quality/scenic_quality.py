@@ -15,9 +15,6 @@ from natcap.invest.pygeoprocessing_0_3_3 import geoprocessing
 from natcap.invest.scenic_quality import scenic_quality_core
 #from natcap.invest.overlap_analysis import overlap_analysis
 
-logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
-%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
-
 LOGGER = logging.getLogger('natcap.invest.scenic_quality.scenic_quality')
 
 def old_reproject_dataset_uri(original_dataset_uri, *args, **kwargs):
@@ -509,6 +506,14 @@ def execute(args):
 
     #create copy of args
     aq_args=args.copy()
+    for float_key in ('cell_size', 'refraction', 'a_coefficient',
+                      'b_coefficient', 'c_coefficient', 'd_coefficient',
+                      'max_valuation_radius'):
+        try:
+            aq_args[float_key] = float(aq_args[float_key])
+        except (KeyError, ValueError):
+            LOGGER.debug('Key %s not in args or could not be cast to float',
+                         float_key)
 
     #validate input
     LOGGER.debug("Validating parameters.")
@@ -752,3 +757,7 @@ def execute(args):
 
         LOGGER.debug("Set area field values.")
         set_field_by_op_feature_set_uri(overlap_uri, area_name, calculate_percent)
+
+
+def validate(args, limit_to=None):
+    return []

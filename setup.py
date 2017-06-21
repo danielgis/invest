@@ -192,6 +192,7 @@ setup(
         'natcap.invest.fisheries',
         'natcap.invest.habitat_risk_assessment',
         'natcap.invest.hydropower',
+        'natcap.invest.ui',
         'natcap.invest.iui',
         'natcap.invest.iui.dbfpy',
         'natcap.invest.ndr',
@@ -234,8 +235,11 @@ setup(
     ext_modules=EXTENSION_LIST,
     entry_points={
         'console_scripts': [
-            'invest = natcap.invest.iui.cli:main'
+            'invest = natcap.invest.cli:main'
         ],
+    },
+    extras_require={
+        'ui': ('qtpy', 'qtawesome', 'six'),
     },
     cmdclass=CMDCLASS,
     package_data={

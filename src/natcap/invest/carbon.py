@@ -10,10 +10,6 @@ import natcap.invest.pygeoprocessing_0_3_3
 
 from . import utils
 
-logging.basicConfig(
-    format='%(asctime)s %(name)-18s %(levelname)-8s %(message)s',
-    level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
-
 LOGGER = logging.getLogger('natcap.invest.carbon')
 
 _OUTPUT_BASE_FILES = {
@@ -406,3 +402,14 @@ def _generate_report(summary_stats, model_args, html_report_path):
                 '<td>%s</td></tr>' % (
                     result_description, units, value, raw_file_path))
         report_doc.write('</body></html>')
+
+
+def validate(args, limit_to=None):
+    validation_warnings = []
+    if limit_to in ('lulc_cur_year', None):
+        try:
+            int(args['lulc_cur_year'])
+        except (TypeError, ValueError) as error:
+            validation_warnings.append(('lulc_cur_year', str(error)))
+
+    return validation_warnings

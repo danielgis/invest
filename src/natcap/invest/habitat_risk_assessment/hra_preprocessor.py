@@ -7,8 +7,6 @@ import json
 import fnmatch
 import shutil
 
-logging.basicConfig(format='%(asctime)s %(name)-18s %(levelname)-8s \
-    %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 LOGGER = logging.getLogger('natcap.invest.habitat_risk.preprocessor')
 
 
@@ -1062,3 +1060,7 @@ def parse_stress_buffer(uri):
                     left blank.")
 
     return buff_dict
+
+
+def validate(args, limit_to=None):
+    return []

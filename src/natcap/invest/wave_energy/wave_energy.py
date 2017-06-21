@@ -16,8 +16,6 @@ import scipy
 
 import natcap.invest.pygeoprocessing_0_3_3.geoprocessing
 
-logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
-%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
 LOGGER = logging.getLogger('natcap.invest.wave_energy.wave_energy')
 
 class IntersectionError(Exception):
@@ -1619,3 +1617,7 @@ def _create_rat(dataset_path, attr_dict, column_name):
     # Make sure the dataset is closed and cleaned up
     gdal.Dataset.__swig_destroy__(dataset)
     dataset = None
+
+
+def validate(args, limit_to=None):
+    return []

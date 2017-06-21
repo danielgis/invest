@@ -21,9 +21,6 @@ from shapely import speedups
 
 import natcap.invest.pygeoprocessing_0_3_3.geoprocessing
 
-logging.basicConfig(format='%(asctime)s %(name)-18s %(levelname)-8s \
-     %(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
-
 LOGGER = logging.getLogger('natcap.invest.wind_energy.wind_energy')
 
 speedups.enable()
@@ -1938,3 +1935,7 @@ def pixel_size_based_on_coordinate_transform_uri(
     gdal.Dataset.__swig_destroy__(dataset)
     dataset = None
     return (pixel_diff_x, pixel_diff_y)
+
+
+def validate(args, limit_to=None):
+    return []
