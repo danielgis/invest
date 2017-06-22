@@ -18,9 +18,6 @@ from  ..  import utils
 
 import seasonal_water_yield_core  #pylint: disable=import-error
 
-logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
-%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
-
 LOGGER = logging.getLogger(
     'natcap.invest.seasonal_water_yield.seasonal_water_yield')
 
@@ -887,3 +884,7 @@ def _mask_any_nodata(input_raster_path_list, output_raster_path_list):
             mask_if_not_both_valid, output_raster_path_list[index],
             gdal.GDT_Float32, nodata_list[0], pixel_size, 'intersection',
             vectorize_op=False, datasets_are_pre_aligned=True)
+
+
+def validate(args, limit_to=None):
+    return []

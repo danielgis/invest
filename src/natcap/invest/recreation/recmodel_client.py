@@ -31,9 +31,6 @@ if shapely.speedups.available:
 # installed and we import the global version of it rather than the local
 from .. import utils
 
-logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
-%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
-
 LOGGER = logging.getLogger('natcap.invest.recmodel_client')
 # This URL is a NatCap global constant
 RECREATION_SERVER_URL = 'http://data.naturalcapitalproject.org/server_registry/invest_recreation_model/'  # pylint: disable=line-too-long
@@ -196,7 +193,7 @@ def execute(args):
     if args['grid_aoi']:
         LOGGER.info("gridding aoi")
         _grid_vector(
-            args['aoi_path'], args['grid_type'], args['cell_size'],
+            args['aoi_path'], args['grid_type'], float(args['cell_size']),
             file_registry['local_aoi_path'])
     else:
         aoi_vector = ogr.Open(args['aoi_path'])
@@ -1128,3 +1125,7 @@ def _sanitize_path(base_path, raw_path):
         return raw_path
     else:  # assume relative path w.r.t. the response table
         return os.path.join(os.path.dirname(base_path), raw_path)
+
+
+def validate(args, limit_to=None):
+    return []

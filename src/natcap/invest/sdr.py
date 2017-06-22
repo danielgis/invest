@@ -19,9 +19,6 @@ import natcap.invest.pygeoprocessing_0_3_3.routing
 import natcap.invest.pygeoprocessing_0_3_3.routing.routing_core
 from . import utils
 
-logging.basicConfig(format='%(asctime)s %(name)-20s %(levelname)-8s \
-%(message)s', level=logging.DEBUG, datefmt='%m/%d/%Y %H:%M:%S ')
-
 LOGGER = logging.getLogger('natcap.invest.sdr')
 
 _OUTPUT_BASE_FILES = {
@@ -962,3 +959,7 @@ def _generate_report(
         layer.SetFeature(feature)
     original_datasource.Destroy()
     datasource_copy.Destroy()
+
+
+def validate(args, limit_to=None):
+    return []

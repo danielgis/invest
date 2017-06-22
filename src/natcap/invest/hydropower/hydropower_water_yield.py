@@ -917,6 +917,10 @@ def add_dict_to_shape(shape_uri, field_dict, field_name, key):
         layer.SetFeature(feat)
 
 
+def validate(args, limit_to=None):
+    return []
+
+
 def _extract_vector_table_by_key(vector_path, key_field):
     """Return vector attribute table of first layer as dictionary.
 

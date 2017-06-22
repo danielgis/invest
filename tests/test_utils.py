@@ -3,6 +3,8 @@ import unittest
 import os
 import tempfile
 import shutil
+import logging
+import threading
 
 from pygeoprocessing.testing import scm
 import pygeoprocessing.testing
@@ -187,11 +189,94 @@ class ExponentialDecayUtilsTests(unittest.TestCase):
         kernel_filepath = os.path.join(self.workspace_dir, 'kernel_100.tif')
         utils.exponential_decay_kernel_raster(
             expected_distance, kernel_filepath)
+        shutil.copyfile(kernel_filepath, 'kernel.tif')
 
         pygeoprocessing.testing.assert_rasters_equal(
             os.path.join(
                 ExponentialDecayUtilsTests._REGRESSION_PATH,
-                'kernel_100.tif'), kernel_filepath, 1e-6)
+                'kernel_100.tif'), kernel_filepath, abs_tol=1e-6)
+
+
+class SandboxTempdirTests(unittest.TestCase):
+    def setUp(self):
+        """Setup workspace."""
+        self.workspace_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """Delete workspace."""
+        shutil.rmtree(self.workspace_dir)
+
+    def test_sandbox_manager(self):
+        from natcap.invest import utils
+
+        with utils.sandbox_tempdir(suffix='foo',
+                                   prefix='bar',
+                                   dir=self.workspace_dir) as new_dir:
+            self.assertTrue(new_dir.startswith(self.workspace_dir))
+            basename = os.path.basename(new_dir)
+            self.assertTrue(basename.startswith('bar'))
+            self.assertTrue(basename.endswith('foo'))
+
+            # trigger the exception handling for coverage.
+            shutil.rmtree(new_dir)
+
+
+class TimeFormattingTests(unittest.TestCase):
+    def test_format_time_hours(self):
+        from natcap.invest.utils import _format_time
+
+        seconds = 3667
+        self.assertEqual(_format_time(seconds), '1h 1m 7s')
+
+    def test_format_time_minutes(self):
+        from natcap.invest.utils import _format_time
+
+        seconds = 67
+        self.assertEqual(_format_time(seconds), '1m 7s')
+
+    def test_format_time_seconds(self):
+        from natcap.invest.utils import _format_time
+
+        seconds = 7
+        self.assertEqual(_format_time(seconds), '7s')
+
+
+class ThreadFilterTests(unittest.TestCase):
+    def test_thread_filter_same_thread(self):
+        from natcap.invest.utils import ThreadFilter
+
+        # name, level, pathname, lineno, msg, args, exc_info, func=None
+        record = logging.LogRecord(
+            name='foo',
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=500,
+            msg='some logging message',
+            args=(),
+            exc_info=None,
+            func='test_thread_filter_same_thread')
+        filterer = ThreadFilter(threading.currentThread().name)
+
+        # The record comes from the same thread.
+        self.assertEqual(filterer.filter(record), True)
+
+    def test_thread_filter_different_thread(self):
+        from natcap.invest.utils import ThreadFilter
+
+        # name, level, pathname, lineno, msg, args, exc_info, func=None
+        record = logging.LogRecord(
+            name='foo',
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=500,
+            msg='some logging message',
+            args=(),
+            exc_info=None,
+            func='test_thread_filter_same_thread')
+        filterer = ThreadFilter('Thread-nonexistent')
+
+        # The record comes from the same thread.
+        self.assertEqual(filterer.filter(record), False)
 
 
 class BuildLookupFromCsvTests(unittest.TestCase):

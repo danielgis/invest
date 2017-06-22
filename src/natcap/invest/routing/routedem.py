@@ -108,3 +108,7 @@ def execute(args):
                     _DOWNSTREAM_DISTANCE_FILE_PATTERN % file_suffix)
                 natcap.invest.pygeoprocessing_0_3_3.routing.distance_to_stream(
                     flow_direction_path, stream_mask_path, distance_path)
+
+
+def validate(args, limit_to=None):
+    return []
