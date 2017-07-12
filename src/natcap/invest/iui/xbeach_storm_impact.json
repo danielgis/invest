@@ -105,16 +105,6 @@
           "helpText": "File characterizing the storm. A sample file is provided with the InVEST distribution."
         },
         {
-          "id": "sea_bed_depth",
-          "args_id": "sea_bed_depth",
-          "type": "text",
-          "label": "Sea Bed Depth (m)",
-          "defaultValue": "0.0",
-          "required": true,
-          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "Value in the bathemetry raster that represents the height of the sea bed.  This is used when classifying onshore/offshore points.  In most cases this is 0.0."
-        },
-        {
           "id": "nearshore_step_size",
           "args_id": "nearshore_step_size",
           "type": "text",
@@ -183,16 +173,6 @@
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
           "helpText": "A cutoff value for extending the profile.  The profile will not extend to a to an offshore distance any greater than this value."
-        },
-        {
-          "id": "sea_bed_depth",
-          "args_id": "sea_bed_depth",
-          "type": "text",
-          "label": "Sea Bed Depth (m)",
-          "defaultValue": "0.0",
-          "required": true,
-          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "Value in the bathemetry raster that represents the height of the sea bed.  In most cases this is 0.0."
         },
         {
           "id": "tstop",
