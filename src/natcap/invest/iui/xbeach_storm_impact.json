@@ -183,6 +183,34 @@
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
           "helpText": "A cutoff value for extending the profile.  The profile will not extend to a length any greater than this value."
+        },
+        {
+          "id": "sea_bed_depth",
+          "args_id": "sea_bed_depth",
+          "type": "text",
+          "label": "Sea Bed Depth (m)",
+          "defaultValue": "0.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "Value in the bathemetry raster that represents the height of the sea bed.  In most cases this is 0.0."
+        },
+        {
+          "id": "tstop",
+          "args_id": "tstop",
+          "type": "text",
+          "label": "tstop",
+          "defaultValue": "21600",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "zs0",
+          "args_id": "zs0",
+          "type": "text",
+          "label": "zs0",
+          "defaultValue": "1.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
         }
       ]
     }

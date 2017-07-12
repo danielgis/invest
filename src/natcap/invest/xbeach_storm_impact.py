@@ -123,6 +123,9 @@ def execute(args):
                 fnyq       =     1.0000
         args['xbeach_binary_path'] (string): path to XBeach executable.  It's
             used as a system call-through.
+        args['tstop'] (float): a parameter for `params.txt` (not sure what)
+        args['zs0'] (float): a parameter for `params.txt`
+
 
     Returns:
         None.
@@ -601,20 +604,24 @@ def execute(args):
 
             # write out the file that lists the habitats in the order they're
             # reported in.
-            veggiefile_path = os.path.join(
-                xbeach_workspace_path, _VEGGIEFILE_FILE_PATTERN % (
-                    point_name, file_suffix))
-            veggiefile_file = open(veggiefile_path, 'w', 0)
-            for habitat in habitat_name_list:
-                base_habitat_path = os.path.join(
-                    args['habitat_parameter_dir'], '%s.txt' % habitat)
-                target_habitat_path = os.path.join(
-                    xbeach_workspace_path,
-                    os.path.basename(base_habitat_path))
-                LOGGER.debug("%s, %s" % (
-                    base_habitat_path, target_habitat_path))
-                shutil.copyfile(base_habitat_path, target_habitat_path)
-                veggiefile_file.write('%s.txt\n' % habitat)
+            if habitat_name_list != []:
+                veggiefile_path = os.path.join(
+                    xbeach_workspace_path, _VEGGIEFILE_FILE_PATTERN % (
+                        point_name, file_suffix))
+                veggiefile_file = open(veggiefile_path, 'w', 0)
+                for habitat in habitat_name_list:
+                    base_habitat_path = os.path.join(
+                        args['habitat_parameter_dir'], '%s.txt' % habitat)
+                    target_habitat_path = os.path.join(
+                        xbeach_workspace_path,
+                        os.path.basename(base_habitat_path))
+                    LOGGER.debug("%s, %s" % (
+                        base_habitat_path, target_habitat_path))
+                    shutil.copyfile(base_habitat_path, target_habitat_path)
+                    veggiefile_file.write('%s.txt\n' % habitat)
+                veggiefile_file.close()
+            else:
+                veggiefile_path = ''
 
             with open(f_reg['profile_table'][point_name],
                       'r') as profile_table:
@@ -678,8 +685,14 @@ def execute(args):
                     args['storm_parameter_path']))
             shutil.copyfile(
                 args['storm_parameter_path'], xbeach_storm_parameter_path)
+
+            tstop = float(args['tstop'])
+            zs0 = float(args['zs0'])
+
+            LOGGER.debug("out tstop='%s'", tstop)
             _write_xbeach_parameter_file(
                 parameter_file_path, n_points,
+                tstop, zs0,
                 os.path.basename(bed_grid_path),
                 os.path.basename(x_grid_path),
                 os.path.basename(y_grid_path),
@@ -738,7 +751,7 @@ def execute(args):
 
 
 def _write_xbeach_parameter_file(
-        parameter_file_path, n_points, bed_grid_path, x_grid_path,
+        parameter_file_path, n_points, tstop, zs0, bed_grid_path, x_grid_path,
         y_grid_path, storm_parameter_path, veggiefile_path, veggie_grid_path):
     """Write the XBeach parameter file as described in the design doc.
 
@@ -750,6 +763,7 @@ def _write_xbeach_parameter_file(
     Returns:
         None
     """
+    LOGGER.debug("in tstop='%f'", tstop)
     param_file = open(parameter_file_path, 'w')
     param_file.write("%% XBeach parameter settings input file\n")
     param_file.write("%% date: %s\n" % str(datetime.now()))
@@ -771,10 +785,10 @@ def _write_xbeach_parameter_file(
     param_file.write("thetanaut  1\n")
     param_file.write("\n")
     param_file.write("%% Initial conditions \n")
-    param_file.write("zs0       = 1.0\n")
+    param_file.write("zs0       = %f\n" % zs0)
     param_file.write("\n")
     param_file.write("%% Model time \n")
-    param_file.write("tstop     = 21600\n")
+    param_file.write("tstop     = %f\n" % tstop)
     param_file.write("tintg     = 10\n")
     param_file.write("\n")
     param_file.write("%% Wave boundary condition parameters \n")
@@ -787,11 +801,12 @@ def _write_xbeach_parameter_file(
     param_file.write("\n")
     param_file.write("%% Output variables \n")
     param_file.write("\n")
-    param_file.write("%% Vegetation (added by SMV)\n")
-    param_file.write("\n")
-    param_file.write("vegetation = 1\n")
-    param_file.write("veggiefile = %s\n" % veggiefile_path)
-    param_file.write("veggiemapfile = %s\n" % veggie_grid_path)
+    if veggiefile_path != '':
+        param_file.write("%% Vegetation (added by SMV)\n")
+        param_file.write("\n")
+        param_file.write("vegetation = 1\n")
+        param_file.write("veggiefile = %s\n" % veggiefile_path)
+        param_file.write("veggiemapfile = %s\n" % veggie_grid_path)
     param_file.write("morphology = 0\n")
     param_file.write("nonh = 1\n")
     param_file.write("swave = 0\n")
