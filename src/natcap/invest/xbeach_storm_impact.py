@@ -75,9 +75,6 @@ def execute(args):
         args['bathymetry_path'] (string): path to a single band bathymetry
             raster that is projected in linear units and values represent
             elevations.
-        args['sea_bed_depth'] (float): value in bathymetry raster that
-            represents the depth of the sea bed.  In most cases this would be
-            0.
         args['nearshore_step_size'] (float): the number of linear units per
             step to sample the profile when in nearshore mode.
         args['offshore_step_size'] (float): the number of linear units per
@@ -148,15 +145,13 @@ def execute(args):
             "The bathymetry raster at '%s' has more than one band, expected "
             "a single band raster.", args['bathymetry_path'])
 
-    sea_bed_depth = float(args['sea_bed_depth'])
-
     def _land_mask_op(bathymetry):
         """Mask values >= shore height."""
         result = numpy.empty(bathymetry.shape, dtype=numpy.int16)
         result[:] = _MASK_NODATA
         valid_mask = bathymetry != bathymetry_info['nodata'][0]
         result[valid_mask] = numpy.where(
-            bathymetry[valid_mask] >= sea_bed_depth, 1, 0)
+            bathymetry[valid_mask] >= 0.0, 1, 0)
         return result
 
     if (
@@ -335,7 +330,7 @@ def execute(args):
                 xoff=representative_point_coords[0],
                 yoff=representative_point_coords[1],
                 win_xsize=1, win_ysize=1)
-            if representative_point_elevation >= sea_bed_depth:
+            if representative_point_elevation >= 0.0:
                 direction_x *= -1
                 direction_y *= -1
 
