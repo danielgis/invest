@@ -98,12 +98,13 @@ def execute(args):
             values.
         args['representative_point_vector_path'] (string): Path to a point
             vector file that contains points from which to sample bathymetry.
-        args['habitat_vector_path'] (list): Path to a polygon vector that
-            that contains habitat layers.  The presence of overlap/no overlap
-            will be included in the profile results.  Must contain the field
-            name _HABITAT_IDENTIFIER_FIELDNAME to identify the potential
-            habitat IDs for reporting.
-        args['habitat_parameter_dir'] (string): path to a directory that
+        args['habitat_vector_path'] (list): (optional) Path to a polygon
+            vector that that contains habitat layers.  The presence of
+            overlap/no overlap will be included in the profile results.  Must
+            contain the field name _HABITAT_IDENTIFIER_FIELDNAME to identify
+            the potential habitat IDs for reporting.
+        args['habitat_parameter_dir'] (string): (optional, but required if
+            args['habitat_vector_path'] is defined) path to a directory that
             containts [HABITAT_NAME].txt files corresponding to the habitat
             names provided in args['habitat_vector_path'].  The directory
             contains .txt files matching the values in the 'hab_type' fields
@@ -529,12 +530,18 @@ def execute(args):
                     'distance (m),depth (m)')
                 habitat_name_list = []
                 habitat_geometry_name_list = []
-                habitat_vector = ogr.Open(args['habitat_vector_path'])
-                LOGGER.info(
-                    "Parsing habitat layer %s", args['habitat_vector_path'])
-                n_layers = habitat_vector.GetLayerCount()
-                for layer_index, habitat_layer in enumerate(
-                        habitat_vector):
+                if ('habitat_vector_path' in args and
+                        args['habitat_vector_path'] != ''):
+                    LOGGER.info(
+                        "Parsing habitat layer %s",
+                        args['habitat_vector_path'])
+                    habitat_vector = ogr.Open(args['habitat_vector_path'])
+                    n_layers = habitat_vector.GetLayerCount()
+                else:
+                    habitat_vector = []
+                    n_layers = 0
+
+                for layer_index, habitat_layer in enumerate(habitat_vector):
                     LOGGER.info(
                         "Working on habitat layer %d of %d in %s",
                         layer_index+1, n_layers, args['habitat_vector_path'])

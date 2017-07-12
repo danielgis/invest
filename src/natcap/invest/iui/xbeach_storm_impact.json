@@ -67,12 +67,22 @@
           "helpText": "This is a point layer that of representative points to sample the shore.  The model will extend profiles through these points to the nearest shoreline.  Must contain a field called `id` with unique values per feature."
         },
         {
+          "id": "enable_habitats",
+          "args_id": "enable_habitats",
+          "type": "checkbox",
+          "label": "Enable habitats",
+          "defaultValue": true,
+          "required": false,
+          "helpText": "If selected, enables habitat layers."
+        },
+        {
           "id": "habitat_vector_path",
           "args_id": "habitat_vector_path",
           "type": "file",
           "label": "Habitat Layer File (Polygon Vector)",
           "defaultValue": "../storm_impact/habitat_layers.shp",
           "required": true,
+          "enabledBy": "enable_habitats",
           "helpText": "A habitat layer, must contain a field called `hab_type`.  The presence of overlap/no overlap will be included in the profile results."
         },
         {
@@ -82,6 +92,7 @@
           "label": "Habitat Parameter Directory",
           "defaultValue": "../storm_impact/habitat_parameter_files",
           "required": true,
+          "enabledBy": "enable_habitats",
           "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (N), canopy density (Cd), stem diameter (ah), stem height, and drag coefficient (bv)."
         },
         {
