@@ -52,7 +52,7 @@
           "validateAs": {
             "type": "GDAL"
           },
-          "helpText": "A bathymetry raster file with an elevation value for each cell, such that 'underwater' cells can have a negative value."
+          "helpText": "A bathymetry raster file with an elevation value for each cell, such that positive(negative) values correspond to above(under) water elevations."
         },
         {
           "id": "representative_point_vector_path",
@@ -64,7 +64,7 @@
           "validateAs": {
             "type": "OGR"
           },
-          "helpText": "This is a point layer that of representative points to sample the shore.  The model will extend profiles through these points to the nearest shoreline.  Must contain a field called `id` with unique values per feature."
+          "helpText": "The model will extend profiles through these points to the nearest shoreline thus creating profiles perpendicular to the coastline.  Must contain a field called `id` with unique values per feature."
         },
         {
           "id": "enable_habitats",
@@ -83,7 +83,7 @@
           "defaultValue": "../storm_impact/habitat_layers.shp",
           "required": true,
           "enabledBy": "enable_habitats",
-          "helpText": "A habitat layer, must contain a field called `hab_type`.  The presence of overlap/no overlap will be included in the profile results."
+          "helpText": "A habitat layer, must contain a field called `hab_type`.  Profile results will have a column indicating whether or not the habitat layer overlaps the sample point."
         },
         {
           "id": "habitat_parameter_dir",
@@ -93,7 +93,7 @@
           "defaultValue": "../storm_impact/habitat_parameter_files",
           "required": true,
           "enabledBy": "enable_habitats",
-          "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (N), canopy density (Cd), stem diameter (ah), stem height, and drag coefficient (bv)."
+          "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (nsec), drag coefficient (Cd), stem diameter (ah), height of vegetation section relative to the bed, stem diameter (bv), and vegetation/canopy density (N)."
         },
         {
           "id": "storm_parameter_path",
@@ -112,27 +112,27 @@
           "defaultValue": "0.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "Value in the bathemetry raster that represents the height of the sea bed.  In most cases this is 0.0."
+          "helpText": "Value in the bathemetry raster that represents the height of the sea bed.  This is used when classifying onshore/offshore points.  In most cases this is 0.0."
         },
         {
           "id": "nearshore_step_size",
           "args_id": "nearshore_step_size",
           "type": "text",
-          "label": "Nearshore Step Size (m)",
+          "label": "Nearshore resolution (m)",
           "defaultValue": "5.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "The step size to use when sampling any points on the bathemetry layer that are higher than the nearshore depth."
+          "helpText": "The resolution to use when sampling any points on the bathemetry layer that are higher than the nearshore depth."
         },
         {
           "id": "offshore_step_size",
           "args_id": "offshore_step_size",
           "type": "text",
-          "label": "Offshore Step Size (m)",
+          "label": "Offshore resolution (m)",
           "defaultValue": "30.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "The step size to use when sampling any points on the bathemetry layer that are deeper than the offshore depth."
+          "helpText": "The resolution to use when sampling any points on the bathemetry layer that are deeper than the offshore depth."
         },
         {
           "id": "nearshore_depth",
@@ -142,7 +142,7 @@
           "defaultValue": "8.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "A value in the bathemetry raster that indicates where the nearshore 'mode' starts when calculating stepsizes; depths less than this have a stepsize of nearshore_step_size."
+          "helpText": "A value in the bathemetry raster that indicates where the nearshore 'mode' starts when calculating resolutions; depths greater than this have a resolution of nearshore_resolution."
         },
         {
           "id": "offshore_depth",
@@ -152,7 +152,7 @@
           "defaultValue": "-30.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "A value in the bathemetry raster that indicates where the offshore 'mode' starts when calculating stepsizes; depths greater than this have a stepsize of offshore_step_size."
+          "helpText": "A value in the bathemetry raster that indicates where the offshore 'mode' starts when calculating resolutions; depths greater than this (more negative/smaller than this) have a resolution of offshore_resolution."
         },
         {
           "id": "onshore_depth_threshold",
@@ -182,7 +182,7 @@
           "defaultValue": "2000.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$",
-          "helpText": "A cutoff value for extending the profile.  The profile will not extend to a length any greater than this value."
+          "helpText": "A cutoff value for extending the profile.  The profile will not extend to a to an offshore distance any greater than this value."
         },
         {
           "id": "sea_bed_depth",
