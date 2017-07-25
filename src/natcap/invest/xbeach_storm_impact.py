@@ -47,6 +47,7 @@ _CLIPPED_BATHYMETRY_FILE_PATTERN = os.path.join(
 _SAMPLE_POINTS_FILE_PATTERN = os.path.join(
     _PROFILE_WORK_DIRECTORY, 'sample_points_%s%s.shp')
 _PROFILE_TABLE_FILE_PATTERN = 'profile_table_%s%s.csv'
+_REPRESENTATIVE_DEPTH_FILE_PATTERN = 'representative_point_depth_%s%s.txt'
 _X_GRID_FILE_PATTERN = 'x_%s%s.grd'
 _Y_GRID_FILE_PATTERN = 'y_%s%s.grd'
 _BED_GRID_FILE_PATTERN = 'bed_%s%s.grd'
@@ -95,6 +96,9 @@ def execute(args):
             values.
         args['representative_point_vector_path'] (string): Path to a point
             vector file that contains points from which to sample bathymetry.
+        args['enable_habitats'] (bool): If true, habitat analysis is included
+            if false, values for `args['habitat_vector_path']` and
+            `args['habitat_parameter_dir']` are ignored.
         args['habitat_vector_path'] (list): (optional) Path to a polygon
             vector that that contains habitat layers.  The presence of
             overlap/no overlap will be included in the profile results.  Must
@@ -110,18 +114,13 @@ def execute(args):
             corresponding habitat's morphology including number of vertical
             sections (N), canopy density (Cd), stem diameter (ah), stem
             height, and drag coefficient (bv).
-        args['storm_parameter_path'] (string): path to storm parameter file
-            for XBeach.  Example contents below:
-                Hm0        =     7.0000
-                Tp         =     10.000
-                mainang    =   270.0000
-                gammajsp   =     3.3000
-                s          =    20.0000
-                fnyq       =     1.0000
         args['xbeach_binary_path'] (string): path to XBeach executable.  It's
             used as a system call-through.
         args['tstop'] (float): a parameter for `params.txt` (not sure what)
         args['zs0'] (float): a parameter for `params.txt`
+        args['Tp'] (float): a parameter for `jonswap.txt`
+        args['Hm0'] (float): a parameter for `jonswap.txt`
+        args['windv'] (float): parameter for `params.txt`
 
 
     Returns:
@@ -244,11 +243,11 @@ def execute(args):
             shore_points_layer.CreateFeature(point_feature)
 
     LOGGER.info("Constructing offshore profiles")
-    bathy_cols, bathy_rows = bathymetry_info['raster_size']
     representative_point_vector = ogr.Open(
         args['representative_point_vector_path'])
     bathymetry_raster = gdal.Open(args['bathymetry_path'])
     bathymetry_band = bathymetry_raster.GetRasterBand(1)
+    representative_point_distance_to_shore = {}
     for representative_point_layer in representative_point_vector:
         for representative_point in representative_point_layer:
             point_name = representative_point.GetField(
@@ -284,6 +283,7 @@ def execute(args):
             vector_length = (
                 (representative_point[0]-shore_point[0]) ** 2 +
                 (representative_point[1]-shore_point[1]) ** 2) ** 0.5
+            representative_point_distance_to_shore[point_name] = vector_length
             direction_x = (
                 (representative_point[0]-shore_point[0]) / vector_length)
             direction_y = (
@@ -521,6 +521,11 @@ def execute(args):
             f_reg['profile_table'][point_name] = os.path.join(
                 args['workspace_dir'], _PROFILE_TABLE_FILE_PATTERN % (
                     point_name, file_suffix))
+            if 'representative_depth' not in f_reg:
+                f_reg['representative_depth'] = {}
+            f_reg['representative_depth'][point_name] = os.path.join(
+                args['workspace_dir'], _REPRESENTATIVE_DEPTH_FILE_PATTERN % (
+                    point_name, file_suffix))
 
             with open(f_reg['profile_table'][point_name],
                       'w') as profile_table:
@@ -528,7 +533,8 @@ def execute(args):
                     'distance (m),depth (m)')
                 habitat_name_list = []
                 habitat_geometry_name_list = []
-                if ('habitat_vector_path' in args and
+                if (args['enable_habitats'] and
+                        'habitat_vector_path' in args and
                         args['habitat_vector_path'] != ''):
                     LOGGER.info(
                         "Parsing habitat layer %s",
@@ -570,6 +576,9 @@ def execute(args):
                             (preped_shapely_geom, habitat_name))
                 profile_table.write('\n')
 
+                dist_array = numpy.empty(len(sample_points))
+                depth_array = numpy.empty(len(sample_points))
+                point_index = 0
                 for dist, (point_x, point_y), samp_depth in sorted(
                         sample_points):
                     habitat_crossing = [0] * len(habitat_name_list)
@@ -585,9 +594,19 @@ def execute(args):
 
                     profile_table.write(
                         '%f,%f' % (dist, samp_depth))
+                    dist_array[point_index] = dist
+                    depth_array[point_index] = samp_depth
+                    point_index += 1
                     for crossing_value in habitat_crossing:
                         profile_table.write(',%d' % crossing_value)
                     profile_table.write('\n')
+
+            with open(f_reg['representative_depth'][point_name], 'w') as (
+                    representative_depth_file):
+                representative_depth = numpy.interp(
+                    representative_point_distance_to_shore[point_name],
+                    dist_array, depth_array)
+                representative_depth_file.write('%f\n' % representative_depth)
 
             LOGGER.info(
                 "Create XBeach parameter run files for %s", point_name)
@@ -676,18 +695,19 @@ def execute(args):
                 xbeach_workspace_path, _PARAMETERFILE_FILE_PATTERN)
             n_points = len(sample_points)
             xbeach_storm_parameter_path = os.path.join(
-                xbeach_workspace_path, os.path.basename(
-                    args['storm_parameter_path']))
-            shutil.copyfile(
-                args['storm_parameter_path'], xbeach_storm_parameter_path)
+                xbeach_workspace_path, 'jonswap.txt')
+            _write_storm_parameter_file(
+                float(args['Hm0']), float(args['Tp']),
+                xbeach_storm_parameter_path)
 
             tstop = float(args['tstop'])
             zs0 = float(args['zs0'])
+            windv = float(args['windv'])
 
             LOGGER.debug("out tstop='%s'", tstop)
             _write_xbeach_parameter_file(
                 parameter_file_path, n_points,
-                tstop, zs0,
+                tstop, zs0, windv,
                 os.path.basename(bed_grid_path),
                 os.path.basename(x_grid_path),
                 os.path.basename(y_grid_path),
@@ -745,8 +765,19 @@ def execute(args):
                         "xbeach crashed on this run.")
 
 
+def _write_storm_parameter_file(Hm0, Tp, storm_parameter_path):
+    """Write the storm parameter file from raw inputs and default inputs."""
+    with open(storm_parameter_path, 'w') as storm_parameter_file:
+        storm_parameter_file.write('Hm0        = %f\n' % Hm0)
+        storm_parameter_file.write('Tp         = %f\n' % Tp)
+        storm_parameter_file.write('mainang    = %f\n' % 270.0000)
+        storm_parameter_file.write('gammajsp   = %f\n' % 3.3000)
+        storm_parameter_file.write('s          = %f\n' % 20.0000)
+        storm_parameter_file.write('fnyq       = %f\n' % 1.0000)
+
+
 def _write_xbeach_parameter_file(
-        parameter_file_path, n_points, tstop, zs0, bed_grid_path, x_grid_path,
+        parameter_file_path, n_points, tstop, zs0, windv, bed_grid_path, x_grid_path,
         y_grid_path, storm_parameter_path, veggiefile_path, veggie_grid_path):
     """Write the XBeach parameter file as described in the design doc.
 
@@ -806,7 +837,7 @@ def _write_xbeach_parameter_file(
     param_file.write("nonh = 1\n")
     param_file.write("swave = 0\n")
     param_file.write("wind = 1\n")
-    param_file.write("windv = 30.0\n")
+    param_file.write("windv = %f\n" % windv)
     param_file.write("windth = 270\n")
     param_file.write("nglobalvar = 3\n")
     param_file.write("zs\n")
