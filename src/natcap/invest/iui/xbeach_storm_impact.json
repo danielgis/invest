@@ -1,0 +1,216 @@
+{
+  "id": "window",
+  "label": "XBeach Storm Impact Model",
+  "targetScript": "natcap.invest.xbeach_storm_impact",
+  "modelName": "xbeach_storm_impact",
+  "localDocURI": "../documentation/xbeach_storm_impact.html",
+  "height": 975,
+  "width": 700,
+  "elements": [
+    {
+      "id": "workspace_list",
+      "type": "list",
+      "elements": [
+        {
+          "id": "xbeach_binary_path",
+          "args_id": "xbeach_binary_path",
+          "type": "file",
+          "label": "Path to XBeach Executable (.exe file)",
+          "defaultValue": "",
+          "required": false,
+          "helpText": "This is a path to the XBeach binary executable, if present the model will run XBeach on each of the profiles' generated XBeach files.  If absent, the model terminates after making the parameter files."
+        },
+        {
+          "id": "workspace",
+          "args_id": "workspace_dir",
+          "type": "folder",
+          "label": "Workspace",
+          "defaultValue": "~/Documents/xbeach_storm_impact_workspace",
+          "required": true,
+          "helpText": "The selected folder is used as the workspace where all intermediate and output files will be written.<br><br>If the selected folder does not exist, it will be created.<br><br><b>If datasets already exist in the selected folder, they will be overwritten.</b>"
+        },
+        {
+          "id": "results_suffix",
+          "args_id": "results_suffix",
+          "type": "text",
+          "dataType": "string",
+          "label": "Results Suffix (Optional)",
+          "defaultValue": "",
+          "returns": {
+            "ifEmpty": "pass"
+          },
+          "required": false,
+          "helpText": "This text will be appended to the end of the output files to help separate multiple runs."
+        },
+        {
+          "id": "bathymetry_path",
+          "args_id": "bathymetry_path",
+          "type": "file",
+          "label": "Bathymetry Map (Raster)",
+          "defaultValue": "../storm_impact/clipped_claybark_dem.tif",
+          "required": true,
+          "validateAs": {
+            "type": "GDAL"
+          },
+          "helpText": "A bathymetry raster file with an elevation value for each cell, such that positive(negative) values correspond to above(under) water elevations."
+        },
+        {
+          "id": "representative_point_vector_path",
+          "args_id": "representative_point_vector_path",
+          "type": "file",
+          "label": "Representative Points (Point Vector)",
+          "defaultValue": "../storm_impact/claybark_sample_points.shp",
+          "required": true,
+          "validateAs": {
+            "type": "OGR"
+          },
+          "helpText": "The model will extend profiles through these points to the nearest shoreline thus creating profiles perpendicular to the coastline.  Must contain a field called `id` with unique values per feature."
+        },
+        {
+          "id": "enable_habitats",
+          "args_id": "enable_habitats",
+          "type": "checkbox",
+          "label": "Enable habitats",
+          "defaultValue": true,
+          "required": false,
+          "helpText": "If selected, enables habitat layers."
+        },
+        {
+          "id": "habitat_vector_path",
+          "args_id": "habitat_vector_path",
+          "type": "file",
+          "label": "Habitat Layer File (Polygon Vector)",
+          "defaultValue": "../storm_impact/habitat_layers.shp",
+          "required": true,
+          "enabledBy": "enable_habitats",
+          "helpText": "A habitat layer, must contain a field called `hab_type`.  Profile results will have a column indicating whether or not the habitat layer overlaps the sample point."
+        },
+        {
+          "id": "habitat_parameter_dir",
+          "args_id": "habitat_parameter_dir",
+          "type": "folder",
+          "label": "Habitat Parameter Directory",
+          "defaultValue": "../storm_impact/habitat_parameter_files",
+          "required": true,
+          "enabledBy": "enable_habitats",
+          "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (nsec), drag coefficient (Cd), stem diameter (ah), height of vegetation section relative to the bed, stem diameter (bv), and vegetation/canopy density (N)."
+        },
+        {
+          "id": "nearshore_step_size",
+          "args_id": "nearshore_step_size",
+          "type": "text",
+          "label": "Nearshore resolution (m)",
+          "defaultValue": "5.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "The resolution to use when sampling any points on the bathemetry layer that are higher than the nearshore depth."
+        },
+        {
+          "id": "offshore_step_size",
+          "args_id": "offshore_step_size",
+          "type": "text",
+          "label": "Offshore resolution (m)",
+          "defaultValue": "30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "The resolution to use when sampling any points on the bathemetry layer that are deeper than the offshore depth."
+        },
+        {
+          "id": "nearshore_depth",
+          "args_id": "nearshore_depth",
+          "type": "text",
+          "label": "Nearshore depth (m)",
+          "defaultValue": "8.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A value in the bathemetry raster that indicates where the nearshore 'mode' starts when calculating resolutions; depths greater than this have a resolution of nearshore_resolution."
+        },
+        {
+          "id": "offshore_depth",
+          "args_id": "offshore_depth",
+          "type": "text",
+          "label": "Offshore depth (m)",
+          "defaultValue": "-30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A value in the bathemetry raster that indicates where the offshore 'mode' starts when calculating resolutions; depths greater than this (more negative/smaller than this) have a resolution of offshore_resolution."
+        },
+        {
+          "id": "onshore_depth_threshold",
+          "args_id": "onshore_depth_threshold",
+          "type": "text",
+          "label": "Onshore Depth Threshold (m)",
+          "defaultValue": "8.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A cutoff value for sampling the bathemetry profile.  The profile will not extend beyond any height that exceeds this value."
+        },
+        {
+          "id": "offshore_depth_threshold",
+          "args_id": "offshore_depth_threshold",
+          "type": "text",
+          "label": "Offshore Depth Threshold (m)",
+          "defaultValue": "-30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A cutoff value for sampling the bathemetry profile.  The profile will not extend below any depth that exceeds this value."
+        },
+        {
+          "id": "max_profile_length",
+          "args_id": "max_profile_length",
+          "type": "text",
+          "label": "Maximum Profile Length (m)",
+          "defaultValue": "2000.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$",
+          "helpText": "A cutoff value for extending the profile.  The profile will not extend to a to an offshore distance any greater than this value."
+        },
+        {
+          "id": "tstop",
+          "args_id": "tstop",
+          "type": "text",
+          "label": "tstop",
+          "defaultValue": "21600",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "windv",
+          "args_id": "windv",
+          "type": "text",
+          "label": "windv",
+          "defaultValue": "30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "Hm0",
+          "args_id": "Hm0",
+          "type": "text",
+          "label": "Hm0",
+          "defaultValue": "7.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "Tp",
+          "args_id": "Tp",
+          "type": "text",
+          "label": "Tp",
+          "defaultValue": "10.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "zs0",
+          "args_id": "zs0",
+          "type": "text",
+          "label": "zs0",
+          "defaultValue": "1.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        }
+      ]
+    }
+  ]
+}
