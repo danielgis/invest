@@ -96,15 +96,6 @@
           "helpText": "This folder contains .txt files matching the values in the 'hab_type' fields of the habitat layer that represent biophysical properties of the habitat types.  Each file contains attributes for its corresponding habitat's morphology including number of vertical sections (nsec), drag coefficient (Cd), stem diameter (ah), height of vegetation section relative to the bed, stem diameter (bv), and vegetation/canopy density (N)."
         },
         {
-          "id": "storm_parameter_path",
-          "args_id": "storm_parameter_path",
-          "type": "file",
-          "label": "Storm Parameter File (Text File)",
-          "defaultValue": "../storm_impact/jonswap.txt",
-          "required": true,
-          "helpText": "File characterizing the storm. A sample file is provided with the InVEST distribution."
-        },
-        {
           "id": "nearshore_step_size",
           "args_id": "nearshore_step_size",
           "type": "text",
@@ -180,6 +171,33 @@
           "type": "text",
           "label": "tstop",
           "defaultValue": "21600",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "windv",
+          "args_id": "windv",
+          "type": "text",
+          "label": "windv",
+          "defaultValue": "30.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "Hm0",
+          "args_id": "Hm0",
+          "type": "text",
+          "label": "Hm0",
+          "defaultValue": "7.0",
+          "required": true,
+          "validText": "^[-]?[0-9]+\\.?[0-9]*$"
+        },
+        {
+          "id": "Tp",
+          "args_id": "Tp",
+          "type": "text",
+          "label": "Tp",
+          "defaultValue": "10.0",
           "required": true,
           "validText": "^[-]?[0-9]+\\.?[0-9]*$"
         },
