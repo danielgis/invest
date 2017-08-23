@@ -1,7 +1,7 @@
+# TODO: make logging level global and you mentioned that you were thinking of adding a dropbdown box.
+
 # coding=UTF-8
-"""
-Single entry point for all InVEST applications.
-"""
+"""Single entry point for all InVEST applications."""
 from __future__ import absolute_import
 
 import argparse
@@ -11,7 +11,7 @@ import logging
 import sys
 import collections
 import pprint
-import warnings
+import warnings  # TODO: unused import
 import multiprocessing
 
 try:
@@ -20,7 +20,7 @@ except ValueError:
     # When we're in a pyinstaller build, this isn't a module.
     from natcap.invest import utils
 
-import six
+import six # TODO: should this go above the utils import for PEP8 standards, or does it have to go last?
 
 LOGGER = logging.getLogger(__name__)
 _UIMETA = collections.namedtuple('UIMeta', 'pyname gui aliases')
@@ -149,7 +149,7 @@ _MODEL_UIS = {
 }
 
 
-def _format_args(args_dict):
+def _format_args(args_dict):  # TODO: worth a docstring?
     sorted_args = sorted(six.iteritems(args_dict), key=lambda x: x[0])
 
     max_key_width = 0
@@ -163,7 +163,7 @@ def _format_args(args_dict):
     return args_string
 
 
-def _import_ui_class(gui_class):
+def _import_ui_class(gui_class): # TODO: worth a docstring?
     mod_name, classname = gui_class.split('.')
     module = importlib.import_module(
         name='.ui.%s' % mod_name,
@@ -194,14 +194,12 @@ def _import_ui_class(gui_class):
 #       PS: Optionally, don't validate inputs, but do validate by default.
 
 
-def list_models():
+def list_models():  # TODO: worth a docstring, or consider whether you want this to be a function at all?  returning sorted(_MODEL_UIS.keys()) would be fine w/ me if it were inline
     return sorted(_MODEL_UIS.keys())
 
 
-def format_models():
-    """
-    Pretty-print available models.
-    """
+def format_models(): # TODO: maybe literally call it pretty_print_models?
+    """Pretty-print available models."""
     print 'Available models:'
     model_names = list_models()
     max_model_name_length = max(len(name) for name in model_names)
@@ -219,13 +217,13 @@ def format_models():
             alias_string = '(%s)' % alias_string
 
         strings.append(template_string.format(
-                modelname=model_name.ljust(max_model_name_length),
-                aliases=alias_string.ljust(max_alias_name_length),
-                usage=usage_string))
+            modelname=model_name.ljust(max_model_name_length),
+            aliases=alias_string.ljust(max_alias_name_length),
+            usage=usage_string))
     return strings
 
 
-class ListModelsAction(argparse.Action):
+class ListModelsAction(argparse.Action):  # TODO: docstring for this class
     def __init__(self,
                  option_strings,
                  dest,
@@ -241,13 +239,13 @@ class ListModelsAction(argparse.Action):
             required=required,
             help=help, *args, **kwargs)
 
-    def __call__(self, parser, namespace, values, option_string):
+    def __call__(self, parser, namespace, values, option_string): # TODO: FYI, this marks as different function signature than overridden call, because `option_string` is optional i.e. `option_string=None`.  And maybe worth a short docstring?
         setattr(namespace, self.dest, self.const)
         parser.exit(message='\n'.join(format_models()) + '\n')
 
 
-class SelectModelAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string):
+class SelectModelAction(argparse.Action):  # TODO: worth a docstring?
+    def __call__(self, parser, namespace, values, option_string):  # TODO: same as above w/ option_string=None + docstring
         if values in ['', None]:
             parser.print_help()
             print '\n'.join(format_models())
@@ -259,7 +257,7 @@ class SelectModelAction(argparse.Action):
             known_aliases = {}
             for modelname, meta in _MODEL_UIS.iteritems():
                 for alias in meta.aliases:
-                    assert alias not in known_aliases, (
+                    assert alias not in known_aliases, (  # TODO: could there be a better place to check for this?  If an alias is repeated, it means we won't discover until a user tries to run a model on the command line.  If it's important and you expect it to be a common issue, maybe put it globally right after the dictionary is defined?
                         'Alias %s already defined for model %s') % (
                             alias, known_aliases[alias])
                     known_aliases[alias] = modelname
@@ -270,7 +268,7 @@ class SelectModelAction(argparse.Action):
             exact_matches = [model for model in known_models if
                              model == values]
 
-            if len(matching_models) == 1:  # match an indentifying substring
+            if len(matching_models) == 1:  # match an identifying substring
                 modelname = matching_models[0]
             elif len(exact_matches) == 1:  # match an exact modelname
                 modelname = exact_matches[0]
@@ -287,7 +285,7 @@ class SelectModelAction(argparse.Action):
         setattr(namespace, self.dest, modelname)
 
 
-def write_console_files(out_dir, extension):
+def write_console_files(out_dir, extension):  # TODO: where is this used?  I couldn't find anything with a grep.
     """
     Write out console files for each of the target models to the output dir.
 
@@ -313,9 +311,9 @@ def main():
     Single entry point for all InVEST model user interfaces.
 
     This function provides a CLI for calling InVEST models, though it it very
-    primitive.  Apart from displaying a help messsage and the version, this
+    primitive.  Apart from displaying a help message and the version, this
     function will also (optionally) list the known models (based on the found
-    json filenames) and will fire up an IUI interface based on the model name
+    json filenames) and will fire up an IUI interface based on the model name  # TODO: no longer based on json filenames, right?
     provided.
     """
 
@@ -373,7 +371,6 @@ def main():
                                    help=('Do not validate inputs before '
                                          'running the model.'))
 
-
     list_group.add_argument('model', action=SelectModelAction, nargs='?',
                             help=('The model/tool to run. Use --list to show '
                                   'available models/tools. Identifiable model '
@@ -412,13 +409,13 @@ def main():
         # set the sip API in natcap.invest.ui.inputs.
         # Set it here, before we can do the actual importing.
         import sip
-        sip.setapi('QString', 2)
+        sip.setapi('QString', 2)  # TODO: comment on what 2 is?
 
         from natcap.invest.ui import inputs
     except ImportError:
         print ('Error: ui not installed:\n'
                '    pip install natcap.invest[ui]')
-        return 3
+        return 3  # TODO: comment on what 3 is?
 
     if args.headless:
         from natcap.invest import scenarios
@@ -438,7 +435,7 @@ def main():
             if 'workspace_dir' in paramset.args:
                 workspace = paramset.args['workspace_dir']
             else:
-                parser.exit(3, (
+                parser.exit(3, (  # TODO: comment on 3, or if it's a special exit code then maybe a _GLOBAL?
                     'Workspace not defined. \n'
                     'Use --workspace to specify or add a '
                     '"workspace_dir" parameter to your scenario.'))
@@ -485,7 +482,7 @@ def main():
 
                 if overwrite_denied:
                     # Exit the parser with an error message.
-                    parser.exit(2, ('Use --workspace to define an '
+                    parser.exit(2, ('Use --workspace to define an '  # TODO: comment on exit code
                                     'alternate workspace.  Aborting.'))
                 else:
                     LOGGER.warning(
@@ -504,7 +501,7 @@ def main():
             if args.scenario:
                 model_form.load_scenario(args.scenario)
         except Exception as error:
-            parser.exit('Could not load scenario: %s\n', error)
+            parser.exit('Could not load scenario: %s\n', error)  # TODO: should you raise the exception here too rather than try to run w/o a scenario?
 
         if args.workspace:
             model_form.workspace.set_value(args.workspace)

@@ -66,6 +66,7 @@ DEFAULT_LASTDIR = ''
 def _cleanup():
     # Adding this allows tests to run on linux via `python setup.py nosetests`
     # and `python setup.py test` without segfault.
+    # TODO: I don't think you need the global here since you aren't setting QT_APP
     global QT_APP
     QT_APP.deleteLater()  # pragma: no cover
 atexit.register(_cleanup)
@@ -113,7 +114,7 @@ def open_workspace(dirname):
         LOGGER.error(error)
         LOGGER.error(
             ('Cannot find default file browser. Platform: %s |'
-                ' folder: %s'), platform.system(), dirname)
+             ' folder: %s'), platform.system(), dirname)
 
 
 def center_window(window_ptr):
@@ -167,12 +168,9 @@ class Validator(QtCore.QObject):
         Returns:
             ``None``
         """
-        for i in xrange(10):
-            if self._validation_thread.isRunning():
-                break
-            self._validation_thread.start()
-            QtCore.QThread.currentThread().msleep(5)
-
+        # TODO: I changed this code base here to wait on the validation thread if it was already running.  This'll prevent a race condition from two separate validations running and reporting something.
+        if self._validation_thread.isRunning():
+            self._validation_thread.wait()
         self.started.emit()
         self._validation_worker = ValidationWorker(
             target=target,
@@ -189,12 +187,12 @@ class Validator(QtCore.QObject):
             LOGGER.debug(warnings_)
             self.finished.emit(warnings_)
 
+        # TODO: does it anymore?  We're guaranteed the thread is not running by this point so you can add signals in any order?
         # Order matters with these callbacks.
         self._validation_worker.finished.connect(self._validation_thread.quit)
         self._validation_worker.finished.connect(_finished)
         self._validation_worker.finished.connect(
             self._validation_worker.deleteLater)
-        QtCore.QThread.currentThread().msleep(25)  # avoids segfault
         self._validation_worker.start()
 
 
@@ -459,6 +457,7 @@ class FileSystemRunDialog(QtWidgets.QDialog):
         self.openWorkspaceCB.setVisible(False)
         self.openWorkspaceButton.setVisible(True)
 
+    # TODO: unused `event` parameter?
     def _request_workspace(self, event=None):
         open_workspace(self.out_folder)
 
@@ -519,6 +518,7 @@ class InfoButton(QtWidgets.QPushButton):
             self.setWhatsThis(default_message)
         self.clicked.connect(self._show_popup)
 
+    # TODO: unused `clicked`?  I'm guessing some of these are to match a function prototype?
     def _show_popup(self, clicked=None):
         QtWidgets.QWhatsThis.enterWhatsThisMode()
         QtWidgets.QWhatsThis.showText(self.mapToGlobal(self.pos()),
@@ -910,7 +910,7 @@ class FolderButton(AbstractFileSystemButton):
         self.open_method = self.dialog.open_folder
 
 
-class Input(QtCore.QObject):
+class Input(QtCore.QObject):  # UIInput: We'd talked about this, and started to change it myself, but if there's a better name than `Input` and later on the object instances called `input`.  Like UIInput?  Or more verbose InVESTUIInput?  I don't feel that strongly about it, but might appreciate a less general name when we revisit this code in 5 years.
     """Base class for InVEST inputs.
 
     Key concepts for the input class include:
@@ -940,6 +940,7 @@ class Input(QtCore.QObject):
         * set_value(self, value)
     """
 
+    # TODO: worth a docstring about where/why these signals are used for the API user?
     value_changed = QtCore.Signal(six.text_type)
     interactivity_changed = QtCore.Signal(bool)
     sufficiency_changed = QtCore.Signal(bool)
@@ -968,7 +969,6 @@ class Input(QtCore.QObject):
         self.interactive = interactive
         self.args_key = args_key
         self.helptext = helptext
-        self.lock = threading.Lock()
         self.sufficient = False
         self._visible_hint = True
 
@@ -988,7 +988,7 @@ class Input(QtCore.QObject):
         Returns:
             ``None``
         """
-        new_sufficiency = bool(self.value()) and self.interactive
+        new_sufficiency = bool(self.value()) and self.interactive  # TODO: do you need to check `value` rather than `self.value`. and are you doing the `bool` to check for None or for False?  I have a comment later on relating to a PEP8 standard that we should explicitly check for None if that's what we're doing rather than fall back on the boolean value of it.
 
         LOGGER.debug('Sufficiency for %s %s --> %s', self,
                      self.sufficient, new_sufficiency)
@@ -1042,6 +1042,7 @@ class Input(QtCore.QObject):
         """
         raise NotImplementedError
 
+    # TODO: other classes override this function but have a different function signature.  make senese to change this to `def set_value(self, value)`
     def set_value(self):
         """Set the value of this input.
 
@@ -1053,6 +1054,7 @@ class Input(QtCore.QObject):
         """
         raise NotImplementedError
 
+    # TODO: any chance we could remove this function?  I think it's confusing to say something like set_noninteractive(False) to mean an object is interactive.  Plus it's not much work to use set_interactive directly?
     def set_noninteractive(self, noninteractive):
         """Set interactivity as the negative of the provided parameter.
 
@@ -1081,6 +1083,7 @@ class Input(QtCore.QObject):
         """
         self.interactive = enabled
         for widget in self.widgets:
+            # TODO: Can you explicitly test for None here, per PEP8 "Also, beware of writing if x when you really mean if x is not None -- e.g. when testing whether a variable or argument that defaults to None was set to some other value. The other value might have a type (such as a container) that could be false in a boolean context!"
             if not widget:  # widgets to be skipped are None
                 continue
             widget.setEnabled(enabled)
@@ -1099,6 +1102,7 @@ class Input(QtCore.QObject):
         self.setParent(layout.parent().window())  # all widgets belong to Form
         current_row = layout.rowCount()
         for widget_index, widget in enumerate(self.widgets):
+            # TODO: is this also testing for widget == None?
             if not widget:
                 continue
 
@@ -1168,6 +1172,9 @@ class GriddedInput(Input):
         self.validator_ref = validator
         self._validator = Validator(self)
         self._validator.finished.connect(self._validation_finished)
+        self.validator_lock = threading.Lock()
+
+
         self.label_widget = QtWidgets.QLabel(self.label)
         self.hideable = hideable
         self.sufficient = False  # False until value set and interactive
@@ -1177,6 +1184,7 @@ class GriddedInput(Input):
         else:
             self.help_button = QtWidgets.QWidget()  # empty widget!
 
+        # TODO: can you comment on what the Nones are for?  I assume empty space?
         self.widgets = [
             self.valid_button,
             self.label_widget,
@@ -1191,8 +1199,6 @@ class GriddedInput(Input):
             self.label_widget.stateChanged.connect(self._hideability_changed)
             self._hideability_changed(True)
 
-        self.lock = threading.Lock()
-
         # initialize visibility, as we've changed the input's widgets
         self.set_visible(self._visible_hint)
 
@@ -1202,16 +1208,14 @@ class GriddedInput(Input):
         Validation is intended to be triggered by events in the UI and not by
         the user, hence the private function signature.
         """
-        self.lock.acquire()
-
         try:
-            if self.validator_ref:
+            if self.validator_ref:  # TODO: if this is checking against None, explicitly do so
                 LOGGER.info(
                     'Validation: validator taken from self.validator_ref: %s',
                     self.validator_ref)
                 validator_ref = self.validator_ref
             else:
-                if not self.args_key:
+                if not self.args_key: # TODO: if this is checking against None, explicitly do so
                     LOGGER.info(
                         ('Validation: No validator and no args_id defined; '
                          'skipping.  Input assumed to be valid. %s'),
@@ -1240,6 +1244,8 @@ class GriddedInput(Input):
                  'limit_to:%s'),
                 self, validator_ref, args, self.args_key)
 
+            # Prevent multiple self._validator.validate runs
+            self.validator_lock.acquire()
             self._validator.validate(
                 target=validator_ref,
                 args=args,
@@ -1247,14 +1253,15 @@ class GriddedInput(Input):
         except Exception:
             LOGGER.exception('Error found when validating %s, releasing lock.',
                              self)
-            self.lock.release()
             raise
 
     def _validation_finished(self, validation_warnings):
         """Interpret any validation errors and format them for the UI.
 
-        If the validity of the input changes, the ``validity_changed`` signal
-        is emitted with the new validity.
+        This is signaled whenever the validataion for this object is complete.
+        Either through an error or through a callback from the threadded call
+        with self._validator.  If the validity of the input changes, the
+        ``validity_changed`` signal is emitted with the new validity.
 
         Parameters:
             validation_warnings (list): A list of string validation warnings
@@ -1265,6 +1272,7 @@ class GriddedInput(Input):
         """
         new_validity = not bool(validation_warnings)
         if self.args_key:
+            # TODO: several appliccable vs applicable typos
             appliccable_warnings = [w[1] for w in validation_warnings
                                     if self.args_key in w[0]]
         else:
@@ -1280,14 +1288,23 @@ class GriddedInput(Input):
             tooltip_errors = ''
 
         for widget in self.widgets[0:2]:  # skip file selection, help buttons
+            # TODO: is this testing against a "None"?  If so: "widget is not None"?
             if widget:
                 widget.setToolTip(tooltip_errors)
 
         current_validity = self._valid
         self._valid = new_validity
-        self.lock.release()
         if current_validity != new_validity:
             self.validity_changed.emit(new_validity)
+        try:
+            # this releases the lock because the _validate thread must be
+            # complete
+            self.validator_lock.release()
+        except threading.ThreadError:
+            # It's possible this function was called just to wrap up an error
+            # and the lock wasn't acquired at all.  That's okay and pass
+            # through
+            pass
 
     def valid(self):
         """Check the validity of the input.
@@ -1297,8 +1314,9 @@ class GriddedInput(Input):
         """
         # I'd rather use self.lock, but waiting until self.lock is released
         # seems to cause a segfault.  This approach is good enough for now.
-        while self._validator.in_progress():
-            QtCore.QThread.msleep(50)
+        # TODO: I tried this format and this seems to be working fine w/r/t passing tests and working UI.
+        self.validator_lock.acquire()
+        self.validator_lock.release()
         return self._valid
 
     @QtCore.Slot(int)
@@ -1319,6 +1337,7 @@ class GriddedInput(Input):
             ``None``
         """
         for widget in self.widgets[2:]:
+            # TODO: is this testing against None?  "widget is None"
             if not widget:
                 continue
             widget.setHidden(not bool(show_widgets))
@@ -1363,7 +1382,7 @@ class Text(GriddedInput):
         """A custom QLineEdit widget with tweaks for use by Text instances."""
 
         def __init__(self, starting_value=''):
-            """Initalize the TextField instance.
+            """Initialize the TextField instance.
 
             This textfield may accept ``DragEnterEvent``s and ``DropEvent``s,
             but will only do so if the event has text MIME data.
@@ -1485,6 +1504,7 @@ class Text(GriddedInput):
         Returns:
             ``None``
         """
+        # TODO: could these two if statements be replaced with the line `value = str(value).decode('utf-8')`?
         if isinstance(value, int) or isinstance(value, float):
             value = str(value)
 
@@ -1509,7 +1529,7 @@ class _Path(Text):
         """
 
         def __init__(self, starting_value=''):
-            """Initalize the FileField instance.
+            """Initialize the FileField instance.
 
             Parameters:
                 starting_value='' (string): The starting value of the
@@ -1642,6 +1662,7 @@ class _Path(Text):
         self.textfield = _Path.FileField()
         self.textfield.textChanged.connect(self._text_changed)
 
+        # TODO: The None is spacing?
         self.widgets = [
             self.valid_button,
             self.label_widget,
@@ -1681,6 +1702,7 @@ class Folder(_Path):
                        hideable, validator=validator)
         self.path_select_button = FolderButton('Select folder')
         self.path_select_button.path_selected.connect(self.textfield.setText)
+        # TODO: comment on [3]?
         self.widgets[3] = self.path_select_button
 
         if self.hideable:
@@ -1717,6 +1739,7 @@ class File(_Path):
                        hideable, validator=validator)
         self.path_select_button = FileButton('Select file')
         self.path_select_button.path_selected.connect(self.textfield.setText)
+        # TODO: Can you comment on what the [3] index is here?
         self.widgets[3] = self.path_select_button
 
         if self.hideable:
@@ -1869,7 +1892,8 @@ class Dropdown(GriddedInput):
         """Get the validity of the Dropdown.
 
         Returns:
-            ``True``.  Dropdowns are always valid."""
+            ``True``.  Dropdowns are always valid.
+        """
         return True
 
     @QtCore.Slot(int)
@@ -1904,6 +1928,8 @@ class Dropdown(GriddedInput):
         self.dropdown.clear()
         cast_options = []
         for label in options:
+            # TODO: I think there's a PEP8 that prefers `instanceof` rather than `type`
+            # TODO: But this also looks like some code above, which I thought we could directly cast to strng no matter what...  Would that work here?
             if type(label) in (int, float):
                 label = str(label)
             try:
@@ -1995,6 +2021,7 @@ class Label(QtWidgets.QLabel):
 class Container(QtWidgets.QGroupBox, Input):
     """An Input that contains other inputs within a QGridLayout."""
 
+    # TODO: you have a comment below that looks like you might need to do something?
     # need to redefine signals here.
     value_changed = QtCore.Signal(bool)
     interactivity_changed = QtCore.Signal(bool)
@@ -2117,6 +2144,7 @@ class Container(QtWidgets.QGroupBox, Input):
         """
         self.setCheckable(value)
 
+    # TODO: I'd commented to you in person that `input` overrides Python's `input` function, but I don't know that I care so much one way or the other.  I'd be happy to see it called ui_input or something if it's easy.  ...a day later... I also wrote a comment about the naming convention of `class Input`.
     def add_input(self, input):
         """Add an input to the Container.
 
@@ -2329,6 +2357,7 @@ class Multi(Container):
         layout = self.layout()
         rightmost_item = layout.itemAtPosition(
             layout.rowCount()-1, layout.columnCount()-1)
+        # TODO: could you comment on what this is doing?  Are you checking for None?
         if not rightmost_item:
             col_index = layout.columnCount()-1
         else:
@@ -2458,6 +2487,7 @@ class Form(QtWidgets.QWidget):
         # demo.
         self.submitted.emit()
 
+    # TODO: This redefines Python's min and max.  Could you choose another name like min_val and max_val?
     def update_scroll_border(self, min, max):
         """Show or hide the border of the scrolling area as needed.
 
@@ -2494,6 +2524,7 @@ class Form(QtWidgets.QWidget):
         if not hasattr(target, '__call__'):
             raise ValueError('Target %s must be callable' % target)
 
+        # TODO: for PEP8, can you define a "self._thread = None" in `__init__` so this isn't the first instance of it being defined?
         self._thread = execution.Executor(target,
                                           args,
                                           kwargs)
@@ -2506,7 +2537,7 @@ class Form(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def _run_finished(self):
-        """A slot that is called when the exceutor thread finishes.
+        """A slot that is called when the executor thread finishes.
 
         Returns:
             ``None``

@@ -35,6 +35,7 @@ class Executor(QtCore.QObject, threading.Thread):
         threading.Thread.__init__(self)
         self.target = target
 
+        # TODO: I see you're allowing None or False, but is that something that's useful in practice?  Same w/ kwargs below
         if not args:
             args = ()
         self.args = args
@@ -72,7 +73,7 @@ class Executor(QtCore.QObject, threading.Thread):
             self.failed = True
             self.exception = error
             self.traceback = traceback.format_exc()
+        # TODO: unless there's a reason for it, for style, I might either remove the 'finally' clause or move self.finished.emit() under the clause since the except clause is catching almost everything and passing through.
         finally:
             LOGGER.info('Execution finished')
-
         self.finished.emit()

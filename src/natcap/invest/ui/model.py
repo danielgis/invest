@@ -55,22 +55,10 @@ _SCENARIO_SAVE_OPTS = {
 }
 
 
-def try_cast(value, target_type):
-    """Attempt to cast a value to a type.
-
-    Returns:
-        If the cast is successful, the new value is returned.  If not, the
-        original value is returned.
-    """
-    try:
-        return target_type(value)
-    except ValueError:
-        return value
-
-
 @contextlib.contextmanager
 def wait_on_signal(signal, timeout=250):
     """Block loop until signal emitted, or timeout (ms) elapses."""
+    # TODO: need a global here?  You aren't setting the value...
     global QT_APP
     loop = QtCore.QEventLoop()
     signal.connect(loop.quit)
@@ -284,6 +272,7 @@ class SettingsDialog(OptionsDialog):
             'cache_dir', cache_dir, unicode))
         self._container.add_input(self.cache_directory)
 
+    #TODO: the base postprocess has a default of 0 for `exitcode` should this also?  Or remove parent's default?
     def postprocess(self, exitcode):
         """Save the settings from the dialog.
 
@@ -291,7 +280,8 @@ class SettingsDialog(OptionsDialog):
             ``None``
         """
         if exitcode == QtWidgets.QDialog.Accepted:
-            inputs.INVEST_SETTINGS.setValue('cache_dir', self.cache_directory.value())
+            inputs.INVEST_SETTINGS.setValue(
+                'cache_dir', self.cache_directory.value())
 
 
 class AboutDialog(QtWidgets.QDialog):
@@ -338,11 +328,11 @@ class AboutDialog(QtWidgets.QDialog):
                 ('GDAL', 'MIT and others', 'http://gdal.org'),
                 ('matplotlib', 'BSD', 'http://matplotlib.org'),
                 ('natcap.versioner', 'BSD',
-                'http://bitbucket.org/jdouglass/versioner'),
+                 'http://bitbucket.org/jdouglass/versioner'),
                 ('numpy', 'BSD', 'http://numpy.org'),
                 ('pyamg', 'BSD', 'http://github.com/pyamg/pyamg'),
                 ('pygeoprocessing', 'BSD',
-                'http://bitbucket.org/richpsharp/pygeoprocessing'),
+                 'http://bitbucket.org/richpsharp/pygeoprocessing'),
                 ('PyQt', 'GPL',
                 'http://riverbankcomputing.com/software/pyqt/intro'),
                 ('rtree', 'LGPL', 'http://toblerity.org/rtree/'),
@@ -438,7 +428,7 @@ class WindowTitle(QtCore.QObject):
         modified (bool): Whether the scenario file has been modified.  If so,
             a ``'*'`` is displayed next to the scenario filename.
     """
-
+    # TODO: just want to check that it makes sense to have these be Class attributes other than object attributes?  Looks like it's referred to later as an object attribute, and I could see an issue if there were multiple WindowTitles in one process?
     title_changed = QtCore.Signal(unicode)
     format_string = "{modelname}: {filename}{modified}"
 
@@ -538,6 +528,7 @@ class ScenarioOptionsDialog(OptionsDialog):
         self.include_workspace.set_value(False)
 
         @validation.validator
+        # TODO: `limit_to` is unused in the body of this function.  Remove?
         def _validate_parameter_file(args, limit_to=None):
             warnings = []
             archive_dir = os.path.dirname(args['archive_path'])
@@ -608,7 +599,8 @@ class ScenarioOptionsDialog(OptionsDialog):
 
         Returns:
             If the dialog is rejected, ``None`` is returned.
-            If the dialog is accepted, a ``ScenarioSaveOpts`` instance is returned.
+            If the dialog is accepted, a ``ScenarioSaveOpts`` instance is
+                returned.
         """
         result = OptionsDialog.exec_(self)
         if result == QtWidgets.QDialog.Accepted:
@@ -745,9 +737,9 @@ class Model(QtWidgets.QMainWindow):
     override these four attributes at the class level:
 
         * ``label`` (string): The model label.
-        * ``target`` (function reference): The reference to the target function.
-            For InVEST, this will always be the ``execute`` function of the
-            target model.
+        * ``target`` (function reference): The reference to the target
+            function. For InVEST, this will always be the ``execute`` function
+            of the target model.
         * ``validator`` (function reference): The reference to the target
             validator function.  For InVEST, this will always be the
             ``validate`` function of the target model.
@@ -756,7 +748,7 @@ class Model(QtWidgets.QMainWindow):
 
     If any of these attributes are not overridden, a warning will be raised.
     """
-
+    # TODO: does it make sense to have these be class attributes instead of object parameters?
     label = None
     target = None
     validator = None
@@ -784,19 +776,23 @@ class Model(QtWidgets.QMainWindow):
         self.scenario_options_dialog = ScenarioOptionsDialog(
             paramset_basename=paramset_basename)
 
-        self.scenario_archive_extract_dialog = ScenarioArchiveExtractionDialog()
+        self.scenario_archive_extract_dialog = (
+            ScenarioArchiveExtractionDialog())
         self.quit_confirm_dialog = QuitConfirmDialog()
         self.validation_report_dialog = WholeModelValidationErrorDialog()
-        self.workspace_overwrite_confirm_dialog = WorkspaceOverwriteConfirmDialog()
+        self.workspace_overwrite_confirm_dialog = (
+            WorkspaceOverwriteConfirmDialog())
         self.local_docs_missing_dialog = LocalDocsMissingDialog(self.localdoc)
 
         def _settings_saved_message():
+            # TODO: what's the 10000 mean?
             self.statusBar().showMessage('Settings saved', 10000)
         self.settings_dialog.accepted.connect(_settings_saved_message)
 
         # These attributes should be defined in subclass
         for attr in ('label', 'target', 'validator', 'localdoc'):
             if not getattr(self, attr):  # None unless overridden in subclass
+                #TODO: this seems to be the only use of the `warnings` package.  Can it be replaced with a logger call?
                 warnings.warn('Class attribute %s.%s is not defined' % (
                     self.__class__.__name__, attr))
 
@@ -889,6 +885,7 @@ class Model(QtWidgets.QMainWindow):
             self.label)
 
     def _check_local_docs(self, link=None):
+        # TODO: are you using `not link` here to test for None?  If so, can you change to link is not None.  Otherwise, this is some fun functionality for the doc link.
         if not link or link == 'localdocs':
             link = 'file://' + os.path.abspath(self.localdoc)
 
@@ -940,10 +937,11 @@ class Model(QtWidgets.QMainWindow):
         alert_message = (
             'Saved current parameters to %s' % save_filepath)
         LOGGER.info(alert_message)
-
+        # TODO: what's the 10000 mean?
         self.statusBar().showMessage(alert_message, 10000)
         self.window_title.filename = os.path.basename(save_filepath)
 
+    # TODO: we talked about this, but wondering if there's a better name than `input` and `Input`.  For one, `input` is a built in Python function already.  And maybe UIInput and ui_input might be a better alternative?  Just to consider...
     def add_input(self, input):
         """Add an input to the model.
 
@@ -1075,6 +1073,7 @@ class Model(QtWidgets.QMainWindow):
 
         self.load_args(args)
         self.window_title.filename = window_title_filename
+        # TODO: what's the 10000 mean?
         self.statusBar().showMessage(
             'Loaded scenario from %s' % os.path.abspath(scenario_path), 10000)
 
@@ -1144,9 +1143,10 @@ class Model(QtWidgets.QMainWindow):
         """Fetch a list of all model inputs.
 
         Returns:
-            A list of all objects known to this ``Model`` instance that are subclasses of
-            ``Input``.
+            A list of all objects known to this ``Model`` instance that are
+            subclasses of ``Input``.
         """
+        # TODO: we'd talked about an alternative to __dict__ such as a dictionary that maps arg key to the Input object in the `add_input` function.  When I tried to do this myself, it looked promising but I broke a bunch of test cases that assume "input()" and others are stlil legit functions.
         return [ref for ref in self.__dict__.values()
                 if isinstance(ref, inputs.Input)]
 
@@ -1204,6 +1204,7 @@ class Model(QtWidgets.QMainWindow):
                 self.close(prompt=False)
 
             self.form.run_finished.connect(_quickrun_close_model)
+            # TODO: Can you comment on the 50?
             QtCore.QTimer.singleShot(50, self.execute_model)
 
         # The scrollArea defaults to a size that is too small to actually view
@@ -1213,6 +1214,7 @@ class Model(QtWidgets.QMainWindow):
         # all parts of the application window will still be visible, even if
         # the minimumSize().height() would have it extend over the edge of the
         # screen.
+        # TODO: can you comment where the 100 and 150 numbers come from? Or paramaterize them globally or in settings or something?
         self.resize(
             self.form.scroll_area.widget().minimumSize().width()+100,
             self.form.scroll_area.widget().minimumSize().height()+150)
@@ -1258,15 +1260,17 @@ class Model(QtWidgets.QMainWindow):
             ``None``
         """
         if self.prompt_on_close:
-            starting_checkstate = self.settings.value('remember_lastrun',
-                                                    True, bool)
-            button_pressed = self.quit_confirm_dialog.exec_(starting_checkstate)
+            starting_checkstate = self.settings.value(
+                'remember_lastrun', True, bool)
+            button_pressed = self.quit_confirm_dialog.exec_(
+                starting_checkstate)
             if button_pressed != QtWidgets.QMessageBox.Yes:
                 event.ignore()
             elif self.quit_confirm_dialog.checkbox.isChecked():
                 self.save_lastrun()
-            self.settings.setValue('remember_lastrun',
-                                self.quit_confirm_dialog.checkbox.isChecked())
+            self.settings.setValue(
+                'remember_lastrun',
+                self.quit_confirm_dialog.checkbox.isChecked())
         self.prompt_on_close = True
 
     def save_lastrun(self):
@@ -1288,6 +1292,7 @@ class Model(QtWidgets.QMainWindow):
         # If no lastrun args saved, "{}" (empty json object) is returned
         lastrun_args = self.settings.value("lastrun", "{}")
         self.load_args(json.loads(lastrun_args))
+        # TODO: what's the 10000 mean?
         self.statusBar().showMessage('Loaded parameters from previous run.',
                                      10000)
         self.window_title.filename = 'loaded from autosave'
