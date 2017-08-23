@@ -2903,7 +2903,7 @@ def _write_console_files(binary, mode):
                    capture=True).split('\n'):
         # Models always preceded by 4 spaces in printout.
         if line.startswith('    '):
-            model_name = line.replace('UNSTABLE', '').lstrip().rstrip()
+            model_name = re.findall('[a-z_]+', line.strip())[0]
 
             console_filename = os.path.join(bindir, filename_template).format(
                 modelname=model_name, extension=mode)
@@ -3415,17 +3415,20 @@ def test(args):
         Run tests within a virtualenv.  If we're running with the --jenkins
         flag, add a couple more options suitable for that environment.
         """
+        _coverage_flags = (
+            '--with-coverage '
+            '--cover-package=natcap.invest '
+            '--cover-erase ')
         if parsed_args.jenkins:
-            jenkins_flags = (
+            flags = _coverage_flags + (
                 '--with-xunit '
-                '--with-coverage '
                 '--cover-xml '
                 '--cover-tests '
                 '--logging-filter=None '
                 '--nologcapture '
             )
         else:
-            jenkins_flags = ''
+            flags = _coverage_flags + '--cover-html '
 
         if len(parsed_args.nose_args) == 0:
             # Specifying all tests by hand here because Windows doesn't like the *
@@ -3440,8 +3443,8 @@ def test(args):
             # If the user gave us some test names to run, run those instead!
             tests = parsed_args.nose_args
 
-        sh(('nosetests -vsP {jenkins_opts} {tests}').format(
-                jenkins_opts=jenkins_flags,
+        sh(('nosetests -vsP --nologcapture {opts} {tests}').format(
+                opts=flags,
                 tests=' '.join(tests)
             ))
 
