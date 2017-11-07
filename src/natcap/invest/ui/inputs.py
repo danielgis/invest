@@ -2112,7 +2112,7 @@ class Container(QtWidgets.QGroupBox, InVESTModelInput):
 
         self.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,  # horizontal
-            QtWidgets.QSizePolicy.MinimumExpanding)  # vertical
+            QtWidgets.QSizePolicy.Maximum)  # vertical
 
     @QtCore.Slot(bool)
     def _hide_widgets(self, check_state):
@@ -2146,7 +2146,6 @@ class Container(QtWidgets.QGroupBox, InVESTModelInput):
         """
         if self.isCheckable():
             self._hide_widgets(self.value())
-        self.resize(self.sizeHint())
 
     @property
     def expanded(self):
