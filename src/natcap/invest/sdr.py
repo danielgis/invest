@@ -984,6 +984,11 @@ def validate(args, limit_to=None):
             the error message in the second part of the tuple. This should
             be an empty list if validation succeeds.
     """
+    import traceback
+    logger = logging.getLogger('sdr debugger')
+    logger.setLevel(logging.DEBUG)
+    print "entering validate from %s"
+    traceback.print_stack()
     missing_key_list = []
     no_value_list = []
     validation_error_list = []
