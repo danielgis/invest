@@ -76,10 +76,10 @@ def _collect_spatial_files(filepath, data_dir):
     # that instead of the individual file.
 
     with utils.capture_gdal_logging():
-        raster = gdal.Open(filepath)
+        raster = gdal.OpenEx(filepath, gdal.OF_RASTER)
         if raster is not None:
             new_path = tempfile.mkdtemp(prefix='raster_', dir=data_dir)
-            driver = raster.GetDriver()
+            driver = gdal.GetDriverByName('GTiff')
             LOGGER.info('[%s] Saving new raster to %s',
                         driver.LongName, new_path)
             # driver.CreateCopy returns None if there's an error
@@ -108,10 +108,10 @@ def _collect_spatial_files(filepath, data_dir):
             raster = None
             return new_path
 
-        vector = ogr.Open(filepath)
+        vector = gdal.OpenEx(filepath, gdal.OF_VECTOR)
         if vector is not None:
             # OGR also reads CSVs; verify this IS actually a vector
-            driver = vector.GetDriver()
+            driver = gdal.GetDriverByName('ESRI Shapefile')
             if driver.GetName() == 'CSV':
                 driver = None
                 vector = None
@@ -120,14 +120,14 @@ def _collect_spatial_files(filepath, data_dir):
             new_path = tempfile.mkdtemp(prefix='vector_', dir=data_dir)
             LOGGER.info('[%s] Saving new vector to %s',
                         driver.GetName(), new_path)
-            new_vector = driver.CopyDataSource(vector, new_path)
+            new_vector = driver.CreateCopy(new_path, vector)
 
             # This is needed for copying GeoJSON files, and presumably other
             # formats as well.
             if not new_vector:
                 new_path = os.path.join(new_path,
                                         os.path.basename(filepath))
-                new_vector = driver.CopyDataSource(vector, new_path)
+                new_vector = driver.CreateCopy(new_path, vector)
             new_vector.SyncToDisk()
             driver = None
             vector = None
