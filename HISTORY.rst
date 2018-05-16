@@ -10,6 +10,10 @@ Unreleased Changes
   crash.
 * Fixed an issue with the Fisheries UI where alpha and beta parameter inputs
   were incorrectly disabled for the Ricker recruitment function.
+* InVEST now uses a Makefile to automate the build processes.  GNU Make is
+  required to use the Makefile.  See ``README.rst`` for instructions on
+  building InVEST.  This replaces the old ``pavement.py`` build entrypoint,
+  which has been removed.
 
 
 3.4.4 (2018-03-26)
