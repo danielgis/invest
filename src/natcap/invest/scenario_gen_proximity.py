@@ -1,5 +1,4 @@
 """Scenario Generation: Proximity Based."""
-
 from __future__ import absolute_import
 
 import math
@@ -11,13 +10,12 @@ import struct
 import heapq
 import time
 import collections
-import csv
 
 import numpy
 from osgeo import osr
 from osgeo import gdal
-from osgeo import ogr
 import natcap.invest.pygeoprocessing_0_3_3
+import pygeoprocessing
 import scipy
 
 from . import validation
@@ -96,7 +94,7 @@ def execute(args):
         args['workspace_dir'], 'intermediate_outputs')
     tmp_dir = os.path.join(args['workspace_dir'], 'tmp')
 
-    natcap.invest.pygeoprocessing_0_3_3.geoprocessing.create_directories(
+    utils.make_directories(
         [output_dir, intermediate_output_dir, tmp_dir])
 
     f_reg = utils.build_file_registry(
@@ -116,9 +114,12 @@ def execute(args):
     shutil.copy(args['base_lulc_path'], f_reg['base_lulc_path'])
     if 'aoi_path' in args and args['aoi_path'] != '':
         # clip base lulc to a new raster
-        natcap.invest.pygeoprocessing_0_3_3.clip_dataset_uri(
-            args['base_lulc_path'], args['aoi_path'], f_reg['base_lulc_path'],
-            assert_projections=True, all_touched=False)
+        target_pixel_size = pygeoprocessing.get_raster_info(
+            args['base_lulc_path'])['pixel_size']
+        pygeoprocessing.align_and_resize_raster_stack(
+            [args['base_lulc_path']], [f_reg['base_lulc_path']], ['nearest'],
+            target_pixel_size, 'intersection',
+            base_vector_path_list=[args['aoi_path']])
 
     scenarios = [
         (args['convert_farthest_from_edge'], 'farthest_from_edge', -1.0),
@@ -139,6 +140,68 @@ def execute(args):
             focal_landcover_codes, convertible_type_list, score_weight,
             int(args['n_fragmentation_steps']), distance_from_edge_uri,
             output_landscape_raster_uri, stats_uri)
+
+
+def _mask_raster_by_vector(
+        base_raster_path_band, vector_path, target_raster_path):
+    """Mask pixels outside of the vector to nodata.
+
+    Parameters:
+        base_raster_path (string): path/band tuple to raster to process
+        vector_path (string): path to single layer raster that is used to
+            indicate areas to preserve from the base raster.  Areas outside
+            of this vector are set to nodata.
+        target_raster_path (string): path to a single band raster that will be
+            created of the same dimensions and data type as
+            `base_raster_path_band` where any pixels that lie outside of
+            `vector_path` coverage will be set to nodata.
+
+    Returns:
+        None.
+
+    """
+    base_raster_info = pygeoprocessing.get_raster_info(
+        base_raster_path_band[0])
+    nodata = base_raster_info['nodata'][base_raster_path_band[1]-1]
+    pygeoprocessing.new_raster_from_base(
+        base_raster_path_band[0], target_raster_path,
+        base_raster_info['datatype'], [nodata], fill_value_list=[nodata])
+
+    tmp_dir = tempfile.mkdtemp()
+    mask_raster_path = os.path.join(tmp_dir, 'mask.tif')
+
+    pygeoprocessing.new_raster_from_base(
+        base_raster_path_band[0], mask_raster_path,
+        gdal.GDT_Byte, [0], fill_value_list=[0])
+
+    pygeoprocessing.rasterize(vector_path, mask_raster_path, [1], None)
+
+    target_raster = gdal.OpenEx(
+        target_raster_path, gdal.GA_Update | gdal.OF_RASTER)
+    target_band = target_raster.GetRasterBand(1)
+
+    mask_raster = gdal.OpenEx(mask_raster_path, gdal.OF_RASTER)
+    mask_band = mask_raster.GetRasterBand(1)
+
+    base_raster = gdal.OpenEx(base_raster_path_band[0], gdal.OF_RASTER)
+    base_band = base_raster.GetRasterBand(base_raster_path_band[1])
+
+    for offset_dict in pygeoprocessing.iterblocks(
+            mask_raster_path, offset_only=True):
+        base_array = base_band.ReadAsArray(**offset_dict)
+        mask_array = mask_band.ReadAsArray(**offset_dict)
+        base_array[mask_array != 1] = nodata
+        target_band.WriteArray(
+            base_array, xoff=offset_dict['xoff'], yoff=offset_dict['yoff'])
+    target_band.FlushCache()
+    target_band = None
+    target_raster = None
+    mask_band = None
+    mask_raster = None
+    try:
+        shutil.rmtree(tmp_dir)
+    except OSError:
+        LOGGER.warn("Unable to delete temporary file %s", mask_raster_path)
 
 
 def _convert_landscape(
@@ -320,14 +383,12 @@ def _log_stats(stats_cache, pixel_area, stats_uri):
         None
     """
     with open(stats_uri, 'wb') as csv_output_file:
-        stats_writer = csv.writer(
-            csv_output_file, delimiter=',', quotechar=',',
-            quoting=csv.QUOTE_MINIMAL)
-        stats_writer.writerow(
-            ['lucode', 'area converted (Ha)', 'pixels converted'])
+        csv_output_file.write('lucode,area converted (Ha),pixels converted\n')
         for lucode in sorted(stats_cache):
-            stats_writer.writerow([
-                lucode, stats_cache[lucode] * pixel_area, stats_cache[lucode]])
+            csv_output_file.write(
+                '%s,%s,%s\n' % (
+                    lucode, stats_cache[lucode] * pixel_area,
+                    stats_cache[lucode]))
 
 
 def _sort_to_disk(dataset_uri, score_weight=1.0):
