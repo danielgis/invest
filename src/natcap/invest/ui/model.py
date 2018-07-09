@@ -15,6 +15,8 @@ import contextlib
 import functools
 import datetime
 import codecs
+import multiprocessing
+import importlib
 
 from qtpy import QtWidgets
 from qtpy import QtCore
@@ -114,6 +116,36 @@ def is_probably_datastack(filepath):
         pass
 
     return False
+
+
+def _validate_n_workers(args, limit_to=None):
+    """A custom validation hook for the number of workers.
+
+    Parameters:
+        args (dict): An args dict mapping string keys to values.
+        limit_to=None (string or None): If a string, only those key-value
+            pairse with keys matching this string will be validated.  If None,
+            all keys will be validated.
+
+    Returns:
+        A list of (iterable of keys, string error) tuples.  If no validation
+        errors found, an empty list is returned.
+    """
+    try:
+        if int(args['n_workers']) < 1:
+            return [
+                (['n_workers'], ('If provided, number of workers cannot be '
+                                 'less than 1'))]
+        if int(args['n_workers']) != float(args['n_workers']):
+            return [
+                (['n_workers'], ('Number of workers must be a positive '
+                                 'integer'))]
+    except ValueError:
+        # When n_workers is an empty string.  Input is optional, so this is not
+        # an error.
+        pass
+
+    return []
 
 
 class OptionsDialog(QtWidgets.QDialog):
@@ -414,6 +446,36 @@ class SettingsDialog(OptionsDialog):
             'logging/logfile', 'NOTSET', unicode))
         self._global_opts_container.add_input(self.logfile_logging_level)
 
+        self._taskgraph_opts = inputs.Container(
+            label='Parallelism (experimental)')
+        self.layout().addWidget(self._taskgraph_opts)
+        self.taskgraph_enable_multicore = inputs.Checkbox(
+            label='Enable multicore computation',
+            helptext=('Check this box to enable multicore computation for '
+                      'InVEST models that support it.'))
+        self.taskgraph_enable_multicore.set_value(
+            inputs.INVEST_SETTINGS.value(
+                'taskgraph/use_multicore', False, bool))
+        self._taskgraph_opts.add_input(self.taskgraph_enable_multicore)
+
+        def _enable_multicore_input(value):
+            self.taskgraph_n_cpus.set_interactive(value)
+
+        self.taskgraph_enable_multicore.value_changed.connect(_enable_multicore_input)
+
+        self.taskgraph_n_cpus = inputs.Text(
+            label='Number of CPUs',
+            helptext=('Some models are able to take advantage of multiple '
+                      'CPU cores.  Setting this to anything higher than 1 '
+                      'will result in some models using more CPU cores '
+                      'when possible.'),
+            interactive=self.taskgraph_enable_multicore.value())
+        self.taskgraph_n_cpus.set_value(inputs.INVEST_SETTINGS.value(
+            'taskgraph/n_cpus', '1', unicode))
+        self.taskgraph_n_cpus.textfield.setValidator(
+            QtGui.QIntValidator(1, multiprocessing.cpu_count() - 1))
+        self._taskgraph_opts.add_input(self.taskgraph_n_cpus)
+
     def postprocess(self, exitcode):
         """Save the settings from the dialog.
 
@@ -432,6 +494,13 @@ class SettingsDialog(OptionsDialog):
             inputs.INVEST_SETTINGS.setValue(
                 'logging/logfile',
                 self.logfile_logging_level.value())
+
+            inputs.INVEST_SETTINGS.setValue(
+                'taskgraph/use_multicore',
+                self.taskgraph_enable_multicore.value())
+            inputs.INVEST_SETTINGS.setValue(
+                'taskgraph/n_cpus',
+                self.taskgraph_n_cpus.value())
 
 
 class AboutDialog(QtWidgets.QDialog):
@@ -1177,8 +1246,26 @@ class InVESTModel(QtWidgets.QMainWindow):
             label='Results suffix (optional)',
             validator=self.validator)
         self.suffix.textfield.setMaximumWidth(150)
+
         self.add_input(self.workspace)
         self.add_input(self.suffix)
+
+        # If the model has a documented input for the number of taskgraph
+        # workers, add an input for it.
+        if 'n_workers' in self.target.__doc__:
+            n_cpus = multiprocessing.cpu_count()
+            self.n_workers = inputs.Text(
+                args_key='n_workers',
+                helptext=(
+                    u'The number of workers to spawn for executing tasks. '
+                    u'If this input is not provided, the model will be '
+                    u'executed in the current process.  <br/><br/>'
+                    u'Your computer has <b>%s CPUs</b>') % n_cpus,
+                label='Number of parallel workers (optional)',
+                validator=_validate_n_workers)
+            self.n_workers.textfield.setMaximumWidth(150)
+            self.add_input(self.n_workers)
+            self.n_workers.set_value(n_cpus)
 
         self.form.submitted.connect(self.execute_model)
 
@@ -1494,6 +1581,16 @@ class InVESTModel(QtWidgets.QMainWindow):
             name = getattr(self, 'label', self.target.__module__)
             logfile_log_level = getattr(logging, inputs.INVEST_SETTINGS.value(
                 'logging/logfile', 'NOTSET'))
+
+            # Use the configured InVEST settings for taskgraph, if available.
+            # Default to no process parallelism.
+            if inputs.INVEST_SETTINGS.value(
+                    'taskgraph/use_multicore', False, bool) is True:
+                taskgraph_n_cpus = inputs.INVEST_SETTINGS.value(
+                    'taskgraph/n_cpus', 1, int)
+            else:
+                taskgraph_n_cpus = 0
+
             with utils.prepare_workspace(args['workspace_dir'],
                                          name,
                                          logging_level=logfile_log_level):
@@ -1502,6 +1599,12 @@ class InVESTModel(QtWidgets.QMainWindow):
                                'Starting model with parameters: \n%s',
                                datastack.format_args_dict(
                                    args, self.target.__module__))
+
+                    try:
+                        args['n_workers'] = self.n_workers.value()
+                    except AttributeError:
+                        # When we don't have n_workers defined
+                        pass
 
                     try:
                         return self.target(args=args)
