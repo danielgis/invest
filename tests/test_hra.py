@@ -4,13 +4,11 @@ import tempfile
 import shutil
 import os
 
-import natcap.invest.pygeoprocessing_0_3_3.testing
 from natcap.invest.pygeoprocessing_0_3_3.testing import scm
 
-
 SAMPLE_DATA = os.path.join(
-    os.path.dirname(__file__), '..', 'data', 'invest-data',
-    'HabitatRiskAssess')
+    os.path.dirname(__file__), '..', 'data', 'invest-test-data',
+    'habitat_risk_assessment', 'synthetic_data')
 REGRESSION_DATA = os.path.join(
     os.path.dirname(__file__), '..', 'data', 'invest-test-data',
     'habitat_risk_assessment')
@@ -41,9 +39,9 @@ class HRATests(unittest.TestCase):
             'csv_uri': os.path.join(
                 SAMPLE_DATA, 'habitat_stressor_ratings_sample'),
             'decay_eq': 'None',
-            'grid_size': 200,
+            'grid_size': 30,
             'max_rating': 3,
-            'max_stress': 4,
+            'max_stress': 2,
             'risk_eq': 'Euclidean',
             'workspace_dir': self.workspace_dir,
         }
@@ -58,7 +56,6 @@ class HRATests(unittest.TestCase):
                 self.workspace_dir, 'output', 'Maps', 'ecosys_risk.tif'),
             1e-6)
 
-
     @scm.skip_if_data_missing(SAMPLE_DATA)
     @scm.skip_if_data_missing(REGRESSION_DATA)
     def test_hra_mult_none(self):
@@ -71,9 +68,9 @@ class HRATests(unittest.TestCase):
             'csv_uri': os.path.join(
                 SAMPLE_DATA, 'habitat_stressor_ratings_sample'),
             'decay_eq': 'None',
-            'grid_size': 200,
+            'grid_size': 30,
             'max_rating': 3,
-            'max_stress': 4,
+            'max_stress': 2,
             'risk_eq': 'Multiplicative',
             'workspace_dir': self.workspace_dir,
         }
@@ -100,9 +97,9 @@ class HRATests(unittest.TestCase):
             'csv_uri': os.path.join(
                 SAMPLE_DATA, 'habitat_stressor_ratings_sample'),
             'decay_eq': 'Linear',
-            'grid_size': 200,
+            'grid_size': 30,
             'max_rating': 3,
-            'max_stress': 4,
+            'max_stress': 2,
             'risk_eq': 'Euclidean',
             'workspace_dir': self.workspace_dir,
         }
@@ -128,16 +125,16 @@ class HRATests(unittest.TestCase):
             'csv_uri': os.path.join(
                 SAMPLE_DATA, 'habitat_stressor_ratings_sample'),
             'decay_eq': 'Exponential',
-            'grid_size': 200,
+            'grid_size': 30,
             'max_rating': 3,
-            'max_stress': 4,
+            'max_stress': 2,
             'risk_eq': 'Euclidean',
             'workspace_dir': self.workspace_dir,
         }
         natcap.invest.habitat_risk_assessment.hra.execute(args)
 
         HRATests._test_same_files(
-            os.path.join(REGRESSION_DATA, 'expected_file_list.txt'),
+            os.path.join(REGRESSION_DATA, 'expected_file_list_euc_exp.txt'),
             args['workspace_dir'])
         natcap.invest.pygeoprocessing_0_3_3.testing.assert_rasters_equal(
             os.path.join(REGRESSION_DATA, 'ecosys_risk_euc_exp.tif'),
