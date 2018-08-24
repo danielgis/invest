@@ -10,8 +10,11 @@ import pygeoprocessing.testing
 
 SAMPLE_DATA = os.path.join(
     os.path.dirname(__file__), '..', 'data', 'invest-data')
+SAMPLE_DATA = r"C:\Users\Joanna Lin\Desktop\test_folder\hydropower\invest-test-data\input"
 REGRESSION_DATA = os.path.join(
     os.path.dirname(__file__), '..', 'data', 'invest-test-data', 'hydropower')
+REGRESSION_DATA = r"C:\Users\Joanna Lin\Desktop\test_folder\hydropower\invest-test-data"
+tempdir = r"C:\Users\Joanna Lin\Desktop\test_folder\hydropower\output"
 
 
 class HydropowerTests(unittest.TestCase):
@@ -21,32 +24,27 @@ class HydropowerTests(unittest.TestCase):
         """Overriding setUp function to create temporary workspace directory."""
         # this lets us delete the workspace after its done no matter the
         # the rest result
-        self.workspace_dir = tempfile.mkdtemp()
+        self.workspace_dir = tempdir # tempfile.mkdtemp()
 
     def tearDown(self):
         """Overriding tearDown function to remove temporary directory."""
-        shutil.rmtree(self.workspace_dir)
+        # shutil.rmtree(self.workspace_dir)
 
     @staticmethod
     def generate_base_args(workspace_dir):
         """Generate an args list that is consistent across regression tests."""
         args = {
             'workspace_dir': workspace_dir,
-            'lulc_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Freshwater', 'landuse_90'),
+            'lulc_uri': os.path.join(SAMPLE_DATA, 'lulc.tif'),
             'depth_to_root_rest_layer_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Freshwater',
-                'depth_to_root_rest_layer'),
-            'precipitation_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Freshwater', 'precip'),
-            'pawc_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Freshwater', 'pawc'),
-            'eto_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Freshwater', 'eto'),
-            'watersheds_uri': os.path.join(
-                SAMPLE_DATA, 'Base_Data', 'Freshwater', 'watersheds.shp'),
+                SAMPLE_DATA,
+                'depth_to_root_rest_layer.tif'),
+            'precipitation_uri': os.path.join(SAMPLE_DATA, 'precip'),
+            'pawc_uri': os.path.join(SAMPLE_DATA, 'pawc.tif'),
+            'eto_uri': os.path.join(SAMPLE_DATA, 'eto.tif'),
+            'watersheds_uri': os.path.join(SAMPLE_DATA, 'watersheds.shp'),
             'biophysical_table_uri': os.path.join(
-                SAMPLE_DATA, 'Hydropower', 'input', 'biophysical_table.csv'),
+                SAMPLE_DATA, 'biophysical_table.csv'),
             'seasonality_constant': 5
         }
         return args
@@ -57,7 +55,7 @@ class HydropowerTests(unittest.TestCase):
 
         args = HydropowerTests.generate_base_args(self.workspace_dir)
         args['sub_watersheds_uri'] = os.path.join(
-            SAMPLE_DATA, 'Base_Data', 'Freshwater', 'subwatersheds.shp')
+            SAMPLE_DATA, 'subwatersheds.shp')
         args['results_suffix'] = 'test'
         hydropower_water_yield.execute(args)
 
@@ -96,9 +94,9 @@ class HydropowerTests(unittest.TestCase):
         args = HydropowerTests.generate_base_args(self.workspace_dir)
         args['calculate_water_scarcity'] = True
         args['demand_table_uri'] = os.path.join(
-            SAMPLE_DATA, 'Hydropower', 'input', 'water_demand_table.csv')
+            SAMPLE_DATA, 'water_demand_table.csv')
         args['sub_watersheds_uri'] = os.path.join(
-            SAMPLE_DATA, 'Base_Data', 'Freshwater', 'subwatersheds.shp')
+            SAMPLE_DATA, 'subwatersheds.shp')
 
         hydropower_water_yield.execute(args)
 
@@ -133,13 +131,13 @@ class HydropowerTests(unittest.TestCase):
         args = HydropowerTests.generate_base_args(self.workspace_dir)
         args['calculate_water_scarcity'] = True
         args['demand_table_uri'] = os.path.join(
-            SAMPLE_DATA, 'Hydropower', 'input', 'water_demand_table.csv')
+            SAMPLE_DATA, 'water_demand_table.csv')
         args['valuation_container'] = True
         args['valuation_table_uri'] = os.path.join(
-            SAMPLE_DATA, 'Hydropower', 'input',
+            SAMPLE_DATA,
             'hydropower_valuation_table.csv')
         args['sub_watersheds_uri'] = os.path.join(
-            SAMPLE_DATA, 'Base_Data', 'Freshwater', 'subwatersheds.shp')
+            SAMPLE_DATA, 'subwatersheds.shp')
 
         hydropower_water_yield.execute(args)
 
