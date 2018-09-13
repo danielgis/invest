@@ -128,7 +128,7 @@ help:
 $(BUILD_DIR) $(DATA_DIR) $(DIST_DIR) $(DIST_DATA_DIR):
 	$(MKDIR) $@
 
-test: $(SVN_DATA_REPO_PATH) $(SVN_TEST_DATA_REPO_PATH)
+test: $(SVN_TEST_DATA_REPO_PATH)
 	$(TESTRUNNER) tests
 
 test_ui:
@@ -318,5 +318,5 @@ jenkins:
 jenkins_test_ui: env
 	$(MAKE) PYTHON=$(ENV_SCRIPTS)/python test_ui
 
-jenkins_test: env $(SVN_DATA_REPO_PATH) $(SVN_TEST_DATA_REPO_PATH)
+jenkins_test: env $(SVN_TEST_DATA_REPO_PATH)
 	$(MAKE) PYTHON=$(ENV_SCRIPTS)/python test
