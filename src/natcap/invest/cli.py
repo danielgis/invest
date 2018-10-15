@@ -131,6 +131,14 @@ _MODEL_UIS = {
         pyname='natcap.invest.wave_energy.wave_energy',
         gui='wave_energy.WaveEnergy',
         aliases=()),
+    'habitat_suitability': _UIMETA(
+        pyname='natcap.invest.habitat_suitability',
+        gui=None,
+        aliases=('hs',)),
+    'urban_flood_risk_mitigation': _UIMETA(
+        pyname='natcap.invest.urban_flood_risk_mitigation',
+        gui='urban_flood_risk_mitigation.UrbanFloodRiskMitigation',
+        aliases=('ufrm',)),
 }
 
 # Build up an index mapping aliase to modelname.
