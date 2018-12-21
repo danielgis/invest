@@ -2,6 +2,13 @@
 
 Unreleased Changes
 ------------------
+* Adding a new input to the InVEST Settings window to allow users to customize
+  the value that should be used for the ``n_workers`` parameter in
+  taskgraph-enabled models.  This change involves removing the "Number of
+  Parallel Workers" input from the model inputs pane for some models in
+  favor of this new location.  The default value for this setting is ``-1``,
+  indicating synchronous (non-threaded, non-multiprocessing) execution of
+  tasks.
 * Fixing a bug in Hydropower model where watershed aggregations would be incorrect
   if a watershed is partially covering nodata raster values. Nodata values are now
   ignored in zonal statistics. Numerical results change very slightly in the
