@@ -1923,6 +1923,82 @@ class SettingsDialogTest(_SettingsSandbox):
         finally:
             settings_dialog.close()
 
+    def test_dialog_log_level_initialized(self):
+        """UI SettingsDialog: check initialization of dialog log level."""
+        from natcap.invest.ui import model
+
+        settings_dialog = model.SettingsDialog()
+        self.assertEqual(settings_dialog.dialog_logging_level.value(),
+                         'INFO')
+
+
+    def test_dialog_log_level_set_correctly(self):
+        """UI SettingsDialog: check settings value for dialog threshold."""
+        from natcap.invest.ui import model
+
+        settings_dialog = model.SettingsDialog()
+
+        settings_dialog.show()
+        settings_dialog.dialog_logging_level.set_value('CRITICAL')
+        QTest.mouseClick(settings_dialog.ok_button,
+                         QtCore.Qt.LeftButton)
+        self.qt_app.processEvents()
+        try:
+            self.assertEqual(settings_dialog.dialog_logging_level.value(),
+                             'CRITICAL')
+        finally:
+            settings_dialog.close()
+
+    def test_logfile_log_level_initialized(self):
+        """UI SettingsDialog: check initialization of logfile log level."""
+        from natcap.invest.ui import model
+
+        settings_dialog = model.SettingsDialog()
+        self.assertEqual(settings_dialog.logfile_logging_level.value(),
+                         'NOTSET')
+
+    def test_logfile_log_level_set_correctly(self):
+        """UI SettingsDialog: check settings value for logfile threshold."""
+        from natcap.invest.ui import model
+
+        settings_dialog = model.SettingsDialog()
+
+        settings_dialog.show()
+        settings_dialog.logfile_logging_level.set_value('CRITICAL')
+        QTest.mouseClick(settings_dialog.ok_button,
+                         QtCore.Qt.LeftButton)
+        self.qt_app.processEvents()
+        try:
+            self.assertEqual(settings_dialog.logfile_logging_level.value(),
+                             'CRITICAL')
+        finally:
+            settings_dialog.close()
+
+    def test_n_workers_initialized(self):
+        """UI SettingsDialog: check initialization of n_workers."""
+        from natcap.invest.ui import model
+
+        settings_dialog = model.SettingsDialog()
+        self.assertEqual(settings_dialog.taskgraph_n_workers.value(),
+                         '-1')
+
+    def test_n_workers_set_correctly(self):
+        """UI SettingsDialog: check settings value for n_workers."""
+        from natcap.invest.ui import model
+
+        settings_dialog = model.SettingsDialog()
+
+        settings_dialog.show()
+        settings_dialog.taskgraph_n_workers.set_value('3')
+        QTest.mouseClick(settings_dialog.ok_button,
+                         QtCore.Qt.LeftButton)
+        self.qt_app.processEvents()
+        try:
+            self.assertEqual(settings_dialog.taskgraph_n_workers.value(),
+                             '3')
+        finally:
+            settings_dialog.close()
+
 
 class DatastackOptionsDialogTests(_QtTest):
     def setUp(self):
@@ -2338,6 +2414,44 @@ class ModelTests(_QtTest):
             model_ui.run()
             self.assertTrue(model_ui.isVisible())
         finally:
+            model_ui.close(prompt=False)
+            model_ui.destroy()
+
+    def test_execute_with_n_workers(self):
+        """UI Model: Check that model runs with n_workers parameter."""
+
+        from natcap.invest.ui import inputs
+
+        n_workers_setting = inputs.INVEST_SETTINGS.value(
+            'taskgraph/n_workers', -1, unicode)
+
+        def target_func(args):
+            """n_workers is required in args."""
+            if 'n_workers' not in args:
+                raise ValueError('n_workers should be in args but is not.')
+
+            if args['n_workers'] != n_workers_setting:
+                raise ValueError('n_workers value is not set correctly')
+
+        model_ui = ModelTests.build_model(target_func=target_func)
+        model_ui.workspace.set_value(os.path.join(self.workspace, 'new_dir'))
+
+        try:
+            # Show the window
+            model_ui.run()
+            self.assertTrue(model_ui.isVisible())
+
+            # This should execute without exception.
+            model_ui.execute_model()
+
+            # I don't particularly like spinning here, but it should be
+            # reliable.
+            while model_ui.form.run_dialog.is_executing:
+                self.qt_app.processEvents()
+                time.sleep(0.1)
+            self.assertFalse(model_ui.form._thread.failed)
+        finally:
+            model_ui.form.run_dialog.close()
             model_ui.close(prompt=False)
             model_ui.destroy()
 
