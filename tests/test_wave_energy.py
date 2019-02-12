@@ -67,10 +67,8 @@ class WaveEnergyUnitTests(unittest.TestCase):
         """Overriding tearDown function to remove temporary directory."""
         shutil.rmtree(self.workspace_dir)
 
-    def test_pixel_size_transform(self):
-        """WaveEnergy: testing pixel size transform helper function.
-
-        Function name is : '_pixel_size_based_on_coordinate_transform'.
+    def test_pixel_size_based_on_coordinate_transform(self):
+        """WaveEnergy: testing '_pixel_size_based_on_coordinate_transform' fn.
         """
         from natcap.invest import wave_energy
 
@@ -367,7 +365,7 @@ class WaveEnergyUnitTests(unittest.TestCase):
                           self.workspace_dir)
 
     def test_binary_wave_data_to_dict(self):
-        """WaveEnergy: testing 'load_binary_wave_data_to_dict' function."""
+        """WaveEnergy: testing '_binary_wave_data_to_dict' function."""
         from natcap.invest import wave_energy
 
         wave_file_path = os.path.join(REGRESSION_DATA, 'example_ww3_binary.bin')
@@ -423,7 +421,8 @@ class WaveEnergyRegressionTests(unittest.TestCase):
             'machine_param_path':
             os.path.join(SAMPLE_DATA, 'Machine_Pelamis_Parameter.csv'),
             'dem_path':
-            os.path.join(SAMPLE_DATA, 'resampled_global_dem.tif')
+            os.path.join(SAMPLE_DATA, 'resampled_global_dem.tif'),
+            'n_workers': -1
         }
         return args
 
@@ -458,9 +457,10 @@ class WaveEnergyRegressionTests(unittest.TestCase):
         vector_results = ['GridPts_prj.shp', 'LandPts_prj.shp']
 
         for vector_path in vector_results:
-            WaveEnergyRegressionTests._assert_point_vectors_equal(
+            pygeoprocessing.testing.assert_vectors_equal(
                 os.path.join(args['workspace_dir'], 'output', vector_path),
-                os.path.join(REGRESSION_DATA, 'valuation', vector_path))
+                os.path.join(REGRESSION_DATA, 'valuation', vector_path),
+                1E-6)
 
         table_results = ['capwe_rc.csv', 'wp_rc.csv', 'npv_rc.csv']
 
@@ -560,52 +560,3 @@ class WaveEnergyRegressionTests(unittest.TestCase):
                 os.path.exists(
                     os.path.join(args['workspace_dir'], 'output', table_path)))
 
-    @staticmethod
-    def _assert_point_vectors_equal(a_path, b_path):
-        """Assert that two point geometries in the vectors are equal.
-
-        Parameters:
-            a_path (str): a path to an OGR vector.
-            b_path (str): a path to an OGR vector.
-
-        Returns:
-            None.
-
-        Raises:
-            AssertionError when the two point geometries are not equal up to
-            desired precision (default is 6).
-        """
-        a_shape = ogr.Open(a_path)
-        a_layer = a_shape.GetLayer(0)
-        a_feat = a_layer.GetNextFeature()
-
-        b_shape = ogr.Open(b_path)
-        b_layer = b_shape.GetLayer(0)
-        b_feat = b_layer.GetNextFeature()
-
-        while a_feat is not None:
-            # Get coordinates from point geometry and store them in a list
-            a_geom = a_feat.GetGeometryRef()
-            a_geom_list = re.findall(r'\d+\.\d+', a_geom.ExportToWkt())
-            a_geom_list = [float(x) for x in a_geom_list]
-
-            b_geom = b_feat.GetGeometryRef()
-            b_geom_list = re.findall(r'\d+\.\d+', b_geom.ExportToWkt())
-            b_geom_list = [float(x) for x in b_geom_list]
-
-            try:
-                numpy.testing.assert_array_almost_equal(
-                    a_geom_list, b_geom_list)
-            except AssertionError:
-                a_feature_fid = a_feat.GetFID()
-                b_feature_fid = b_feat.GetFID()
-                raise AssertionError('Geometries are not equal in feature %s, '
-                                     'regression feature %s in layer 0' %
-                                     (a_feature_fid, b_feature_fid))
-            a_feat = None
-            b_feat = None
-            a_feat = a_layer.GetNextFeature()
-            b_feat = b_layer.GetNextFeature()
-
-        a_shape = None
-        b_shape = None
