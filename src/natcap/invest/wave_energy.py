@@ -17,11 +17,13 @@ from osgeo import gdal
 from osgeo import osr
 from osgeo import ogr
 
+import taskgraph
 import pygeoprocessing
 from . import validation
 from . import utils
 
-LOGGER = logging.getLogger('natcap.invest.wave_energy.wave_energy')
+LOGGER = logging.getLogger('natcap.invest.wave_energy')
+logging.getLogger('taskgraph').setLevel(logging.ERROR)
 
 # Set nodata value and target_pixel_type for new rasters
 _NODATA = float(numpy.finfo(numpy.float32).min) + 1.0
@@ -29,11 +31,57 @@ _TARGET_PIXEL_TYPE = gdal.GDT_Float32
 
 # The life span (25 years) of a wave energy conversion facility.
 _LIFE_SPAN = 25
+# Sea water density constant (kg/m^3)
+_SWD = 1028
+# Gravitational acceleration (m/s^2)
+_GRAV = 9.8
+# Constant determining the shape of a wave spectrum (see users guide pg 23)
+_ALFA = 0.86
+
+# Depth field name to be added to the wave vector from DEM data
+_DEPTH_FIELD = 'DEPTH_M'
+# Captured wave energy field name to be added to the wave vector
+_CAP_WE_FIELD = 'CAPWE_MWHY'
+# Wave power field name to be added to the wave vector
+_WAVE_POWER_FIELD = 'WE_kWM'
+
+# Preexisting field names in the wave energy vector
+_HEIGHT_FIELD = 'HSAVG_M'
+_PERIOD_FIELD = 'TPAVG_S'
+
+# Field names for storing distance in wave vector
+_W2L_DIST_FIELD = 'W2L_MDIST'
+_L2G_DIST_FIELD = 'L2G_MDIST'
+_LAND_ID_FIELD = 'LAND_ID'
+
+# Net Present Value (NPV) field for wave vector
+_NPV_25Y_FIELD = 'NPV_25Y'
+# Total captured wave energy field for wave vector
+_CAPWE_ALL_FIELD = 'CAPWE_ALL'
+# Units field for wave vector
+_UNIT_FIELD = 'UNITS'
+
+# Resampling method for target rasters
+_TARGET_RESAMPLE_METHOD = 'near'
+
+# Percentile values and units specified explicitly in the user's guide
+_PERCENTILES = [25, 50, 75, 90]
+_CAPWE_UNITS_SHORT = ' MWh/yr'
+_CAPWE_UNITS_LONG = 'megawatt hours per year'
+_WP_UNITS_SHORT = ' kW/m'
+_WP_UNITS_LONG = 'wave power per unit width of wave crest length'
+_NPV_UNITS_SHORT = ' US$'
+_NPV_UNITS_LONG = 'thousands of US dollars'
+_STARTING_PERC_RANGE = '1'
+
+# Driver name for creating vector files
+_DRIVER_NAME = "ESRI Shapefile"
 
 
 class IntersectionError(Exception):
     """A custom error message for when the AOI does not intersect any wave
         data points.
+
     """
     pass
 
@@ -57,8 +105,8 @@ def execute(args):
         analysis_area_path (str): A string identifying the analysis area of
             interest. Used to determine wave data shapefile, wave data text
             file, and analysis area boundary shape. (required)
-        aoi_path (str): A polygon shapefile outlining a more detailed area
-            within the analysis area. This shapefile should be projected with
+        aoi_path (str): A polygon OGR vector outlining a more detailed area
+            within the analysis area. This vector should be projected with
             linear units being in meters. (required to run Valuation model)
         machine_perf_path (str): The path of a CSV file that holds the
             machine performance table. (required)
@@ -76,6 +124,9 @@ def execute(args):
             parameters table. (required for Valuation)
         number_of_machines (int): An integer specifying the number of machines
             for a wave farm site. (required for Valuation)
+        n_workers (int): The number of worker processes to use for processing
+            this model.  If omitted, computation will take place in the current
+            process. (optional)
 
     Example Args Dictionary::
 
@@ -83,7 +134,7 @@ def execute(args):
             'workspace_dir': 'path/to/workspace_dir',
             'wave_base_data_path': 'path/to/base_data_dir',
             'analysis_area_path': 'West Coast of North America and Hawaii',
-            'aoi_path': 'path/to/shapefile',
+            'aoi_path': 'path/to/vector',
             'machine_perf_path': 'path/to/csv',
             'machine_param_path': 'path/to/csv',
             'dem_path': 'path/to/raster',
@@ -101,6 +152,18 @@ def execute(args):
     output_dir = os.path.join(workspace, 'output')
     intermediate_dir = os.path.join(workspace, 'intermediate')
     utils.make_directories([intermediate_dir, output_dir])
+
+    # Initialize a TaskGraph
+    taskgraph_working_dir = os.path.join(
+        intermediate_dir, '_taskgraph_working_dir')
+    try:
+        n_workers = int(args['n_workers'])
+    except (KeyError, ValueError, TypeError):
+        # KeyError when n_workers is not present in args
+        # ValueError when n_workers is an empty string.
+        # TypeError when n_workers is None.
+        n_workers = -1  # single process mode.
+    task_graph = taskgraph.TaskGraph(taskgraph_working_dir, n_workers)
 
     # Append a _ to the suffix if it's not empty and doesn't already have one
     file_suffix = utils.make_suffix_string(args, 'suffix')
@@ -236,16 +299,13 @@ def execute(args):
 
     # This if/else statement differentiates between having an AOI or doing
     # a broad run on all the wave points specified by args['analysis_area'].
-    if 'aoi_path' not in args:
+    if 'aoi_path' not in args or not args['aoi_path']:
         LOGGER.info('AOI not provided.')
+        aoi_provided = False
 
         # Make a copy of the wave point shapefile so that the original input is
         # not corrupted when we clip the vector
-        analysis_area_vector = gdal.OpenEx(analysis_area_points_path,
-                                           gdal.OF_VECTOR)
-        drv = gdal.GetDriverByName('ESRI Shapefile')
-        drv.CreateCopy(wave_vector_path, analysis_area_vector)
-        analysis_area_vector = None
+        _copy_vector(analysis_area_points_path, wave_vector_path)
 
         # The path to a polygon shapefile that specifies the broader AOI
         aoi_vector_path = analysis_area_extract_path
@@ -262,6 +322,7 @@ def execute(args):
             analysis_area_sr, aoi_sr)
     else:
         LOGGER.info('AOI provided.')
+        aoi_provided = True
         aoi_vector_path = args['aoi_path']
         # Create a coordinate transformation from the projection of the given
         # wave energy point shapefile, to the AOI's projection
@@ -269,17 +330,25 @@ def execute(args):
         aoi_sr_wkt = aoi_sr.ExportToWkt()
 
         # Clip the wave data shapefile by the bounds provided from the AOI
-        _clip_vector_by_vector(analysis_area_points_path, aoi_vector_path,
-                               wave_vector_path, aoi_sr_wkt, intermediate_dir)
+        clip_wave_points_task = task_graph.add_task(
+            func=_clip_vector_by_vector,
+            args=(analysis_area_points_path, aoi_vector_path, wave_vector_path,
+                  aoi_sr_wkt, intermediate_dir),
+            target_path_list=[wave_vector_path],
+            task_name='clip_wave_points_to_aoi')
 
         # Clip the AOI to the Extract shape to make sure the output results do
         # not show extrapolated values outside the bounds of the points
         aoi_clipped_to_extract_path = os.path.join(
             intermediate_dir,
             'aoi_clipped_to_extract_path%s.shp' % file_suffix)
-        _clip_vector_by_vector(aoi_vector_path, analysis_area_extract_path,
-                               aoi_clipped_to_extract_path, aoi_sr_wkt,
-                               intermediate_dir)
+        clip_aoi_task = task_graph.add_task(
+            func=_clip_vector_by_vector,
+            args=(aoi_vector_path, analysis_area_extract_path,
+                  aoi_clipped_to_extract_path, aoi_sr_wkt, intermediate_dir),
+            target_path_list=[aoi_clipped_to_extract_path],
+            task_name='clip_aoi_to_extract_data')
+
         # Replace the AOI path with the clipped AOI path
         aoi_vector_path = aoi_clipped_to_extract_path
 
@@ -299,7 +368,19 @@ def execute(args):
     # from the raster DEM
     LOGGER.info('Adding DEPTH_M field to the wave shapefile from the DEM')
     # Add the depth value to the wave points by indexing into the DEM dataset
-    _index_raster_value_to_point_vector(wave_vector_path, dem_path, 'DEPTH_M')
+    indexed_wave_vector_path = os.path.join(
+        intermediate_dir, 'Indexed_WEM_InputOutput_Pts%s.shp' % file_suffix)
+    if aoi_provided:
+        indexing_dependent_task_list = [clip_wave_points_task, clip_aoi_task]
+    else:
+        indexing_dependent_task_list = None
+    index_depth_to_wave_vector_task = task_graph.add_task(
+        func=_index_raster_value_to_point_vector,
+        args=(wave_vector_path, dem_path, indexed_wave_vector_path,
+              _DEPTH_FIELD),
+        target_path_list=[indexed_wave_vector_path],
+        task_name='index_depth_to_wave_vector',
+        dependent_task_list=indexing_dependent_task_list)
 
     # Generate an interpolate object for wave_energy_capacity
     LOGGER.info('Interpolating machine performance table.')
@@ -310,14 +391,18 @@ def execute(args):
     energy_cap = _wave_energy_capacity_to_dict(
         wave_seastate_bins, energy_interp, machine_param_dict)
 
-    # Add the sum as a field to the shapefile for the corresponding points
-    LOGGER.info('Adding the wave energy sums to the WaveData shapefile')
-    _captured_wave_energy_to_vector(energy_cap, wave_vector_path)
-
-    # Calculate wave power for each wave point and add it as a field
-    # to the shapefile
-    LOGGER.info('Calculating Wave Power.')
-    _compute_wave_power(wave_vector_path)
+    # Add wave energy and wave power fields to the shapefile for the
+    # corresponding points
+    LOGGER.info('Adding wave energy and power fields to the wave vector.')
+    wave_energy_power_vector_path = os.path.join(
+        intermediate_dir, 'Captured_WEM_InputOutput_Pts%s.shp' % file_suffix)
+    create_wave_energy_and_power_raster_task = task_graph.add_task(
+        func=_energy_and_power_to_wave_vector,
+        args=(energy_cap, indexed_wave_vector_path,
+              wave_energy_power_vector_path),
+        target_path_list=[wave_energy_power_vector_path],
+        task_name='get_wave_energy_and_power',
+        dependent_task_list=[index_depth_to_wave_vector_task])
 
     # Intermediate/final output paths for wave energy and wave power rasters
     unclipped_energy_raster_path = os.path.join(
@@ -329,64 +414,90 @@ def execute(args):
     wave_power_raster_path = os.path.join(output_dir,
                                           'wp_kw%s.tif' % file_suffix)
 
-    # Create blank rasters bounded by the shape file of analysis area
-    pygeoprocessing.create_raster_from_vector_extents(
-        aoi_vector_path, unclipped_energy_raster_path, target_pixel_size,
-        _TARGET_PIXEL_TYPE, _NODATA)
+    # Create blank rasters bounded by the vector of analysis area (AOI)
+    if aoi_provided:
+        creating_raster_dependent_task_list = [clip_aoi_task]
+    else:
+        creating_raster_dependent_task_list = None
+    create_unclipped_energy_raster_task = task_graph.add_task(
+        func=pygeoprocessing.create_raster_from_vector_extents,
+        args=(aoi_vector_path, unclipped_energy_raster_path, target_pixel_size,
+              _TARGET_PIXEL_TYPE, _NODATA),
+        target_path_list=[unclipped_energy_raster_path],
+        task_name='create_unclipped_energy_raster',
+        dependent_task_list=creating_raster_dependent_task_list)
 
-    pygeoprocessing.create_raster_from_vector_extents(
-        aoi_vector_path, unclipped_power_raster_path, target_pixel_size,
-        _TARGET_PIXEL_TYPE, _NODATA)
+    create_unclipped_power_raster_task = task_graph.add_task(
+        func=pygeoprocessing.create_raster_from_vector_extents,
+        args=(aoi_vector_path, unclipped_power_raster_path, target_pixel_size,
+              _TARGET_PIXEL_TYPE, _NODATA),
+        target_path_list=[unclipped_power_raster_path],
+        task_name='create_unclipped_power_raster',
+        dependent_task_list=creating_raster_dependent_task_list)
 
     # Interpolate wave energy and power from the shapefile over the rasters
     LOGGER.info('Interpolate wave power and wave energy capacity onto rasters')
+    interpolate_energy_points_task = task_graph.add_task(
+        func=pygeoprocessing.interpolate_points,
+        args=(wave_energy_power_vector_path, _CAP_WE_FIELD,
+              (unclipped_energy_raster_path, 1), _TARGET_RESAMPLE_METHOD),
+        target_path_list=[unclipped_energy_raster_path],
+        task_name='interpolate_energy_points',
+        dependent_task_list=[create_wave_energy_and_power_raster_task,
+                             create_unclipped_energy_raster_task])
 
-    pygeoprocessing.interpolate_points(wave_vector_path, 'CAPWE_MWHY',
-                                       (unclipped_energy_raster_path, 1),
-                                       'near')
-
-    pygeoprocessing.interpolate_points(
-        wave_vector_path, 'WE_kWM', (unclipped_power_raster_path, 1), 'near')
+    interpolate_power_points_task = task_graph.add_task(
+        func=pygeoprocessing.interpolate_points,
+        args=(wave_energy_power_vector_path, _WAVE_POWER_FIELD,
+              (unclipped_power_raster_path, 1), _TARGET_RESAMPLE_METHOD),
+        target_path_list=[unclipped_power_raster_path],
+        task_name='interpolate_power_points',
+        dependent_task_list=[create_wave_energy_and_power_raster_task,
+                             create_unclipped_power_raster_task])
 
     # Clip wave energy and power rasters to the aoi vector
-    target_resample_method = 'near'
-    pygeoprocessing.warp_raster(
-        unclipped_energy_raster_path,
-        target_pixel_size,
-        energy_raster_path,
-        target_resample_method,
-        vector_mask_options={'mask_vector_path': aoi_vector_path},
-        gdal_warp_options=['CUTLINE_ALL_TOUCHED=TRUE'])
-    pygeoprocessing.warp_raster(
-        unclipped_power_raster_path,
-        target_pixel_size,
-        wave_power_raster_path,
-        target_resample_method,
-        vector_mask_options={'mask_vector_path': aoi_vector_path},
-        gdal_warp_options=['CUTLINE_ALL_TOUCHED=TRUE'])
+    clip_energy_raster_task = task_graph.add_task(
+        func=pygeoprocessing.warp_raster,
+        args=(unclipped_energy_raster_path, target_pixel_size,
+              energy_raster_path, _TARGET_RESAMPLE_METHOD),
+        kwargs={'vector_mask_options': {'mask_vector_path': aoi_vector_path},
+                'gdal_warp_options': ['CUTLINE_ALL_TOUCHED=TRUE']},
+        target_path_list=[energy_raster_path],
+        task_name='clip_energy_raster',
+        dependent_task_list=[interpolate_energy_points_task])
 
-    # Create the percentile rasters for wave energy and wave power
-    # These values are hard coded in because it's specified explicitly in
-    # the user's guide what the percentile ranges are and what the units
-    # will be.
-    percentiles = [25, 50, 75, 90]
-    capwe_units_short = ' MWh/yr'
-    capwe_units_long = 'megawatt hours per year'
-    wp_units_short = ' kW/m'
-    wp_units_long = 'wave power per unit width of wave crest length'
-    starting_percentile_range = '1'
+    clip_power_raster_task = task_graph.add_task(
+        func=pygeoprocessing.warp_raster,
+        args=(unclipped_power_raster_path, target_pixel_size,
+              wave_power_raster_path, _TARGET_RESAMPLE_METHOD),
+        kwargs={'vector_mask_options': {'mask_vector_path': aoi_vector_path},
+                'gdal_warp_options': ['CUTLINE_ALL_TOUCHED=TRUE']},
+        target_path_list=[wave_power_raster_path],
+        task_name='clip_power_raster',
+        dependent_task_list=[interpolate_power_points_task])
 
     # Paths for wave energy and wave power percentile rasters
     wp_rc_path = os.path.join(output_dir, 'wp_rc%s.tif' % file_suffix)
     capwe_rc_path = os.path.join(output_dir, 'capwe_rc%s.tif' % file_suffix)
 
-    _create_percentile_rasters(energy_raster_path, capwe_rc_path,
-                               capwe_units_short, capwe_units_long,
-                               percentiles, starting_percentile_range)
+    # Create the percentile rasters for wave energy and wave power
+    task_graph.add_task(
+        func=_create_percentile_rasters,
+        args=(energy_raster_path, capwe_rc_path, _CAPWE_UNITS_SHORT,
+              _CAPWE_UNITS_LONG, _PERCENTILES),
+        kwargs={'start_value': _STARTING_PERC_RANGE},
+        target_path_list=[capwe_rc_path],
+        task_name='create_energy_percentile_raster',
+        dependent_task_list=[clip_energy_raster_task])
 
-    _create_percentile_rasters(wave_power_raster_path, wp_rc_path,
-                               wp_units_short, wp_units_long,
-                               percentiles, starting_percentile_range)
+    task_graph.add_task(
+        func=_create_percentile_rasters,
+        args=(wave_power_raster_path, wp_rc_path, _WP_UNITS_SHORT,
+              _WP_UNITS_LONG, _PERCENTILES),
+        kwargs={'start_value': _STARTING_PERC_RANGE},
+        target_path_list=[wp_rc_path],
+        task_name='create_power_percentile_raster',
+        dependent_task_list=[clip_power_raster_task])
 
     LOGGER.info('Completed Wave Energy Biophysical')
 
@@ -398,244 +509,327 @@ def execute(args):
         LOGGER.info('Valuation selected')
 
     # Output path for landing point shapefile
-    land_vector_path = os.path.join(output_dir,
-                                    'LandPts_prj%s.shp' % file_suffix)
+    land_vector_path = os.path.join(
+        output_dir, 'LandPts_prj%s.shp' % file_suffix)
     # Output path for grid point shapefile
-    grid_vector_path = os.path.join(output_dir,
-                                    'GridPts_prj%s.shp' % file_suffix)
-    # Output path for the projected net present value raster
-    npv_proj_path = os.path.join(intermediate_dir,
-                                 'npv_not_clipped%s.tif' % file_suffix)
-    # Path for the net present value percentile raster
-    npv_rc_path = os.path.join(output_dir, 'npv_rc%s.tif' % file_suffix)
+    grid_vector_path = os.path.join(
+        output_dir, 'GridPts_prj%s.shp' % file_suffix)
 
-    grid_data = grid_land_data.loc[grid_land_data['TYPE'].str.lower() ==
-                                   'grid']
-    land_data = grid_land_data.loc[grid_land_data['TYPE'].str.lower() ==
-                                   'land']
+    grid_data = grid_land_data.loc[
+        grid_land_data['TYPE'].str.lower() == 'grid']
+    land_data = grid_land_data.loc[
+        grid_land_data['TYPE'].str.lower() == 'land']
 
     grid_dict = grid_data.to_dict('index')
     land_dict = land_data.to_dict('index')
 
     # Make a point shapefile for grid points
-    LOGGER.info('Creating Grid Points Shapefile.')
-    _dict_to_point_vector(grid_dict, grid_vector_path, 'grid_points', aoi_sr,
-                          coord_trans)
+    LOGGER.info('Creating Grid Points Vector.')
+    create_grid_points_vector_task = task_graph.add_task(
+        func=_dict_to_point_vector,
+        args=(grid_dict, grid_vector_path, 'grid_points', aoi_sr, coord_trans),
+        target_path_list=[grid_vector_path],
+        task_name='create_grid_points_vector')
 
     # Make a point shapefile for landing points.
-    LOGGER.info('Creating Landing Points Shapefile.')
-    _dict_to_point_vector(land_dict, land_vector_path, 'land_points', aoi_sr,
-                          coord_trans)
+    LOGGER.info('Creating Landing Points Vector.')
+    create_land_points_vector_task = task_graph.add_task(
+        func=_dict_to_point_vector,
+        args=(land_dict, land_vector_path, 'land_points', aoi_sr, coord_trans),
+        target_path_list=[land_vector_path],
+        task_name='create_land_points_vector')
 
-    # Get the coordinates of points of wave, land, and grid vectors
-    wave_points = _get_points_geometries(wave_vector_path)
-    land_points = _get_points_geometries(land_vector_path)
-    grid_points = _get_points_geometries(grid_vector_path)
+    # Add new fields to the wave vector.
+    final_wave_energy_power_vector_path = os.path.join(
+        intermediate_dir, 'Final_WEM_InputOutput_Pts%s.shp' % file_suffix)
+    add_target_fields_to_wave_vector_task = task_graph.add_task(
+        func=_add_target_fields_to_wave_vector,
+        args=(wave_energy_power_vector_path, land_vector_path,
+              grid_vector_path, final_wave_energy_power_vector_path,
+              machine_econ_dict, args['number_of_machines']),
+        target_path_list=[final_wave_energy_power_vector_path],
+        task_name='add_fields_to_wave_vector',
+        dependent_task_list=[create_wave_energy_and_power_raster_task,
+                             create_land_points_vector_task,
+                             create_grid_points_vector_task])
 
-    # Calculate the minimum distances between the relative point groups
-    LOGGER.info('Calculating Min Distances.')
-    wave_to_land_dist, wave_to_land_id = _calculate_min_distances(
-        wave_points, land_points)
-    land_to_grid_dist, _ = _calculate_min_distances(land_points, grid_points)
+    # Intermediate path for the projected net present value raster
+    inter_npv_raster_path = os.path.join(
+        intermediate_dir, 'npv_not_clipped%s.tif' % file_suffix)
+    # Path for the net present value percentile raster
+    target_npv_rc_path = os.path.join(output_dir, 'npv_rc%s.tif' % file_suffix)
+    # Output path for the projected net present value raster
+    target_npv_raster_path = os.path.join(
+        output_dir, 'npv_usd%s.tif' % file_suffix)
 
-    def _add_distance_fields_to_vector(wave_base_vector_path,
-                                       ocean_to_land_dist, land_to_grid_dist):
-        """Add two fields to the wave point shapefile.
+    LOGGER.info('Create NPV raster from wave vector and AOI extents.')
+    create_npv_raster_task = task_graph.add_task(
+        func=_create_npv_raster,
+        args=(final_wave_energy_power_vector_path, aoi_vector_path,
+              inter_npv_raster_path, target_npv_raster_path,
+              target_pixel_size),
+        target_path_list=[inter_npv_raster_path, target_npv_raster_path],
+        task_name='create_npv_raster',
+        dependent_task_list=creating_raster_dependent_task_list.append(
+            add_target_fields_to_wave_vector_task))
 
-        The two fields are the distance from ocean to land, and the distance
-        from land to grid.
+    LOGGER.info('Create percentile NPV raster.')
+    task_graph.add_task(
+        func=_create_percentile_rasters,
+        args=(target_npv_raster_path, target_npv_rc_path, _NPV_UNITS_SHORT,
+              _NPV_UNITS_LONG, _PERCENTILES),
+        target_path_list=[target_npv_rc_path],
+        task_name='create_npv_percentile_raster',
+        dependent_task_list=[create_npv_raster_task])
 
-        Parameters:
-            wave_base_vector_path (str): a path to the wave points shapefile
-            ocean_to_land_dist (np.array): an array of distance values
-            land_to_grid_dist (np.array): an array of distance values
+    # Close Taskgraph
+    task_graph.close()
+    task_graph.join()
+    LOGGER.info('End of Wave Energy Valuation.')
 
-        Returns:
-            None
 
-        """
-        wave_vector = gdal.OpenEx(
-            wave_base_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
-        wave_layer = wave_vector.GetLayer(0)
-        # Add three new fields to the shapefile that will store the distances
-        for field in ['W2L_MDIST', 'LAND_ID', 'L2G_MDIST']:
-            field_defn = ogr.FieldDefn(field, ogr.OFTReal)
-            field_defn.SetWidth(24)
-            field_defn.SetPrecision(11)
-            wave_layer.CreateField(field_defn)
+def _copy_vector(base_vector_path, target_vector_path):
+    """Make a shapefile from the base vector.
 
-        # For each feature in the shapefile add the corresponding distance
-        # from wave_to_land_dist and land_to_grid_dist calculated above
-        iterate_feat = 0
-        wave_layer.ResetReading()
-        feature = wave_layer.GetNextFeature()
-        while feature is not None:
-            wave_to_land_index = feature.GetFieldIndex('W2L_MDIST')
-            land_to_grid_index = feature.GetFieldIndex('L2G_MDIST')
-            id_index = feature.GetFieldIndex('LAND_ID')
+    Parameters:
+        base_vector_path (str): a path to the base vector to be copied from.
+        target_vector_path (str): a path to the target copied shapefile.
 
-            land_id = int(wave_to_land_id[iterate_feat])
+    Returns:
+        None
 
-            feature.SetField(wave_to_land_index,
-                             ocean_to_land_dist[iterate_feat])
-            feature.SetField(land_to_grid_index, land_to_grid_dist[land_id])
-            feature.SetField(id_index, land_id)
+    """
+    base_vector = gdal.OpenEx(base_vector_path, gdal.OF_VECTOR)
+    driver = gdal.GetDriverByName(_DRIVER_NAME)
+    driver.CreateCopy(target_vector_path, base_vector)
+    base_vector = None
 
-            iterate_feat = iterate_feat + 1
 
-            wave_layer.SetFeature(feature)
-            feature = None
-            feature = wave_layer.GetNextFeature()
+def _create_npv_raster(
+        base_wave_vector_path, base_aoi_vector_path, inter_npv_raster_path,
+        target_npv_raster_path, target_pixel_size):
+    """Generate final NPV raster from the wave vector and AOI extent.
 
-        wave_layer = None
-        wave_vector = None
+    Parameters:
+        base_wave_vector_path (str): a path to the wave vector that contains
+            the NPV field.
+        base_aoi_vector_path (str): a path to the AOI vector used for
+            generating and clipping the NPV raster.
+        inter_npv_raster_path (str): a path to the intermediate NPV raster
+            generated based on AOI vector extents.
+        target_npv_raster_path (str): a path to the target NPV raster that
+            has the NPV value and is clipped from the AOI.
+        target_pixel_size (tuple): a tuple of floats representing the target
+            x and y pixel sizes.
 
-    _add_distance_fields_to_vector(wave_vector_path, wave_to_land_dist,
-                                   land_to_grid_dist)
+    Returns:
+        None
 
-    def _calc_npv_wave(annual_revenue, annual_cost):
-        """Calculate NPV for a wave farm based on the annual revenue and cost.
-
-        Parameters:
-            annual_revenue (numpy.array): an array of the annual revenue for
-                the first 25 years
-            annual_cost (numpy.array): an array of the annual cost for the
-                first 25 years
-
-        Returns: The Total NPV which is the sum of all 25 years
-
-        """
-        # The discount rate calculation for the npv equations
-        d_rate = float(machine_econ_dict['r'])  # discount rate
-        rho = 1.0 / (1.0 + d_rate)
-
-        npv = []
-        for time in range(_LIFE_SPAN):
-            npv.append(rho**time * (annual_revenue[time] - annual_cost[time]))
-        return sum(npv)
-
-    def _add_npv_field_to_vector(wave_points_path):
-        """Compute and add NPV to the vector.
-
-        Also compute the total captured wave energy for the entire farm.
-
-        Parameters:
-            wave_points_path (str): a path to the wave energy points with
-                fields for calculating NPV.
-
-        Returns:
-            None
-
-        """
-        wave_point_vector = gdal.OpenEx(
-            wave_points_path, gdal.OF_VECTOR | gdal.GA_Update)
-        wave_point_layer = wave_point_vector.GetLayer()
-
-        # Extract the machine economic parameters
-        cap_max = float(machine_econ_dict['capmax'])  # maximum capacity
-        capital_cost = float(machine_econ_dict['cc'])  # capital cost
-        cml = float(machine_econ_dict['cml'])  # cost of mooring lines
-        cul = float(machine_econ_dict['cul'])  # cost of underwater cable
-        col = float(machine_econ_dict['col'])  # cost of overland cable
-        omc = float(machine_econ_dict['omc'])  # operating & maintenance cost
-        price = float(machine_econ_dict['p'])  # price of electricity
-        smlpm = float(machine_econ_dict['smlpm'])  # slack-moored
-        # Number of machines for a given wave farm
-        units = int(args['number_of_machines'])
-
-        # Add Net Present Value field, Total Captured Wave Energy field, and
-        # Units field to shapefile
-        for field_name in ['NPV_25Y', 'CAPWE_ALL', 'UNITS']:
-            field_defn = ogr.FieldDefn(field_name, ogr.OFTReal)
-            field_defn.SetWidth(24)
-            field_defn.SetPrecision(11)
-            wave_point_layer.CreateField(field_defn)
-        wave_point_layer.ResetReading()
-        feat_npv = wave_point_layer.GetNextFeature()
-
-        # For all the wave farm sites, calculate NPV and write to shapefile
-        LOGGER.info('Calculating the Net Present Value.')
-
-        while feat_npv is not None:
-            depth_index = feat_npv.GetFieldIndex('DEPTH_M')
-            wave_to_land_index = feat_npv.GetFieldIndex('W2L_MDIST')
-            land_to_grid_index = feat_npv.GetFieldIndex('L2G_MDIST')
-            captured_wave_energy_index = feat_npv.GetFieldIndex('CAPWE_MWHY')
-            npv_index = feat_npv.GetFieldIndex('NPV_25Y')
-            capwe_all_index = feat_npv.GetFieldIndex('CAPWE_ALL')
-            units_index = feat_npv.GetFieldIndex('UNITS')
-
-            depth = feat_npv.GetFieldAsDouble(depth_index)
-            wave_to_land = feat_npv.GetFieldAsDouble(wave_to_land_index)
-            land_to_grid = feat_npv.GetFieldAsDouble(land_to_grid_index)
-            captured_wave_energy = feat_npv.GetFieldAsDouble(
-                captured_wave_energy_index)
-            capwe_all_result = captured_wave_energy * units
-
-            # Create a numpy array of length 25, filled with the captured wave
-            # energy in kW/h. Represents the lifetime of this wave farm.
-            captured_we = numpy.ones(_LIFE_SPAN) * (
-                int(captured_wave_energy) * 1000.0)
-            # It is expected that there is no revenue from the first year
-            captured_we[0] = 0
-
-            # Compute values to determine NPV
-            lenml = 3.0 * numpy.absolute(depth)
-            install_cost = units * cap_max * capital_cost
-            mooring_cost = smlpm * lenml * cml * units
-            trans_cost = (wave_to_land * cul / 1000.0) + (
-                land_to_grid * col / 1000.0)
-            initial_cost = install_cost + mooring_cost + trans_cost
-            annual_revenue = price * units * captured_we
-            annual_cost = omc * captured_we * units
-
-            # The first year's costs are the initial start up costs
-            annual_cost[0] = initial_cost
-
-            npv_result = _calc_npv_wave(annual_revenue, annual_cost) / 1000.0
-            feat_npv.SetField(npv_index, npv_result)
-            feat_npv.SetField(capwe_all_index, capwe_all_result)
-            feat_npv.SetField(units_index, units)
-
-            wave_point_layer.SetFeature(feat_npv)
-            feat_npv = None
-            feat_npv = wave_point_layer.GetNextFeature()
-
-        wave_point_layer = None
-        wave_point_vector = None
-        LOGGER.info('Finished calculating the Net Present Value.')
-
-    _add_npv_field_to_vector(wave_vector_path)
-
+    """
     # Create a blank raster from the extents of the wave farm shapefile
-    LOGGER.info('Creating Raster From Vector Extents')
+    LOGGER.info('Creating NPV Raster From AOI Vector Extents')
     pygeoprocessing.create_raster_from_vector_extents(
-        aoi_vector_path, npv_proj_path, target_pixel_size, _TARGET_PIXEL_TYPE,
-        _NODATA)
-    LOGGER.info('Completed Creating Raster From Vector Extents')
+        base_aoi_vector_path, inter_npv_raster_path, target_pixel_size,
+        _TARGET_PIXEL_TYPE, _NODATA)
 
     # Interpolate the NPV values based on the dimensions and corresponding
     # points of the raster, then write the interpolated values to the raster
-    LOGGER.info('Generating Net Present Value Raster.')
-    pygeoprocessing.interpolate_points(wave_vector_path, 'NPV_25Y',
-                                       (npv_proj_path, 1), 'near')
+    LOGGER.info('Interpolating Net Present Value onto Raster.')
+    pygeoprocessing.interpolate_points(
+        base_wave_vector_path, _NPV_25Y_FIELD, (inter_npv_raster_path, 1),
+        _TARGET_RESAMPLE_METHOD)
 
-    npv_out_path = os.path.join(output_dir, 'npv_usd%s.tif' % file_suffix)
-
-    # Clip the raster to the convex hull polygon
+    # Clip the raster to the AOI vector
+    LOGGER.info('Clipping NPV raster with AOI vector.')
     pygeoprocessing.warp_raster(
-        npv_proj_path,
+        inter_npv_raster_path,
         target_pixel_size,
-        npv_out_path,
-        target_resample_method,
-        vector_mask_options={'mask_vector_path': aoi_vector_path},
+        target_npv_raster_path,
+        _TARGET_RESAMPLE_METHOD,
+        vector_mask_options={'mask_vector_path': base_aoi_vector_path},
         gdal_warp_options=['CUTLINE_ALL_TOUCHED=TRUE'])
 
-    # Create the percentile raster for net present value
-    _create_percentile_rasters(npv_out_path, npv_rc_path, ' US$',
-                               'thousands of US dollars', percentiles)
 
-    LOGGER.info('End of Wave Energy Valuation.')
+def _calc_npv_wave(annual_revenue, annual_cost, d_rate):
+    """Calculate NPV for a wave farm based on the annual revenue and cost.
+
+    Parameters:
+        annual_revenue (numpy.array): an array of the annual revenue for
+            the first 25 years
+        annual_cost (numpy.array): an array of the annual cost for the
+            first 25 years
+        d_rate (float) : the discount rate calculation for the NPV equations
+
+    Returns:
+        A float that represents the sum of total NPV of all 25 years.
+
+    """
+
+    rho = 1.0 / (1.0 + d_rate)
+
+    npv = []
+    for time in range(_LIFE_SPAN):
+        npv.append(rho**time * (annual_revenue[time] - annual_cost[time]))
+    return sum(npv)
+
+
+def _get_npv_results(captured_wave_energy, depth, number_of_machines,
+                     wave_to_land_dist, land_to_grid_dist, machine_econ_dict):
+    """Compute NPV, total captured wave energy, and units for wave point.
+
+    Parameters:
+        captured_wave_energy (double): the amount of captured wave energy for
+            a wave machine.
+        depth (double): the depth of that wave point.
+        number_of_machines (int): the number of machines for a given wave point
+        wave_to_land_dist (float): the shortest distance from the wave point to
+            land points.
+        land_to_grid_dist (float): the shortest distance from the wave point to
+            grid points.
+        machine_econ_dict (dict): a dictionary of keys from the first
+            column of the machine economy CSV file and corresponding
+            values from the `VALUE` column.
+
+    Returns:
+        npv_result (float): the sum of total NPV of all 25 years.
+        capwe_all_result (float): the total captured wave energy per year.
+
+    """
+    # Extract the machine economic parameters
+    cap_max = float(machine_econ_dict['capmax'])  # maximum capacity
+    capital_cost = float(machine_econ_dict['cc'])  # capital cost
+    cml = float(machine_econ_dict['cml'])  # cost of mooring lines
+    cul = float(machine_econ_dict['cul'])  # cost of underwater cable
+    col = float(machine_econ_dict['col'])  # cost of overland cable
+    omc = float(machine_econ_dict['omc'])  # operating & maintenance cost
+    price = float(machine_econ_dict['p'])  # price of electricity
+    smlpm = float(machine_econ_dict['smlpm'])  # slack-moored
+    d_rate = float(machine_econ_dict['r'])  # discount rate
+
+    capwe_all_result = captured_wave_energy * number_of_machines
+
+    # Create a numpy array of length 25, filled with the captured wave
+    # energy in kW/h. Represents the lifetime of this wave farm.
+    captured_we = numpy.ones(_LIFE_SPAN) * (int(captured_wave_energy) * 1000.0)
+    # It is expected that there is no revenue from the first year
+    captured_we[0] = 0
+
+    # Compute values to determine NPV
+    lenml = 3.0 * numpy.absolute(depth)
+    install_cost = number_of_machines * cap_max * capital_cost
+    mooring_cost = smlpm * lenml * cml * number_of_machines
+    trans_cost = (wave_to_land_dist * cul / 1000.0) + (
+        land_to_grid_dist * col / 1000.0)
+    initial_cost = install_cost + mooring_cost + trans_cost
+    annual_revenue = price * number_of_machines * captured_we
+    annual_cost = omc * captured_we * number_of_machines
+
+    # The first year's cost is the initial start up cost
+    annual_cost[0] = initial_cost
+
+    # Calculate the total NPV of all 25 years
+    npv_result = _calc_npv_wave(annual_revenue, annual_cost, d_rate) / 1000.0
+
+    return npv_result, capwe_all_result
+
+
+def _add_target_fields_to_wave_vector(
+        base_wave_vector_path, base_land_vector_path, base_grid_vector_path,
+        target_wave_vector_path, machine_econ_dict, number_of_machines):
+    """Add six target fields to the target wave point vector.
+
+    The target fields are the distance from ocean to land, the distance
+    from land to grid, the land point ID, NPV, total captured wave energy, and
+    units.
+
+    Parameters:
+        base_wave_vector_path (str): a path to the wave point vector with
+            fields to calculate distances and NPV.
+        base_land_vector_path (str): a path to the land point vector to get
+            the wave to land distances from.
+        base_grid_vector_path (str): a path to the grid point vector to get
+            the land to grid distances from.
+        target_wave_vector_path (str): a path to the target wave point vector
+            to create new fields in.
+        machine_econ_dict (dict): a dictionary of keys from the first column of
+            the machine economy CSV file and corresponding values from the
+            `VALUE` column.
+        number_of_machines (int): the number of machines for each wave point.
+
+    Returns:
+        None
+
+    """
+    _copy_vector(base_wave_vector_path, target_wave_vector_path)
+    target_wave_vector = gdal.OpenEx(
+        target_wave_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+    target_wave_layer = target_wave_vector.GetLayer(0)
+
+    # Get the coordinates of points of wave, land, and grid vectors
+    wave_point_list = _get_points_geometries(base_wave_vector_path)
+    land_point_list = _get_points_geometries(base_land_vector_path)
+    grid_point_list = _get_points_geometries(base_grid_vector_path)
+
+    # Calculate the minimum distances between the relative point groups
+    LOGGER.info('Calculating Min Distances from wave to land and from land '
+                'to grid.')
+    wave_to_land_dist_list, wave_to_land_id_list = _calculate_min_distances(
+        wave_point_list, land_point_list)
+    land_to_grid_dist_list, _ = _calculate_min_distances(
+        land_point_list, grid_point_list)
+
+    # Add target fields to the wave vector to store results
+    for field in [_W2L_DIST_FIELD, _L2G_DIST_FIELD, _LAND_ID_FIELD,
+                  _NPV_25Y_FIELD, _CAPWE_ALL_FIELD, _UNIT_FIELD]:
+        field_defn = ogr.FieldDefn(field, ogr.OFTReal)
+        field_defn.SetWidth(24)
+        field_defn.SetPrecision(11)
+        target_wave_layer.CreateField(field_defn)
+
+    # For each feature in the shapefile add the corresponding distance
+    # from wave_to_land_dist and land_to_grid_dist calculated above
+    target_wave_layer.ResetReading()
+
+    LOGGER.info('Calculating and adding new fields to wave layer.')
+    for i, feat in enumerate(target_wave_layer):
+        # Get indexes for setting distances fields
+        wave_to_land_index = feat.GetFieldIndex(_W2L_DIST_FIELD)
+        land_to_grid_index = feat.GetFieldIndex(_L2G_DIST_FIELD)
+        land_id_index = feat.GetFieldIndex(_LAND_ID_FIELD)
+        # Get corresponding distances and land ID for the wave point
+        land_id = int(wave_to_land_id_list[i])
+        wave_to_land_dist = wave_to_land_dist_list[i]
+        land_to_grid_dist = land_to_grid_dist_list[land_id]
+
+        # Set distance and land ID fields to the feature
+        feat.SetField(wave_to_land_index, wave_to_land_dist)
+        feat.SetField(land_to_grid_index, land_to_grid_dist)
+        feat.SetField(land_id_index, land_id)
+
+        # Get field indexes for setting NPV, captured energy, and units fields
+        cap_wave_energy_index = feat.GetFieldIndex(_CAP_WE_FIELD)
+        depth_index = feat.GetFieldIndex(_DEPTH_FIELD)
+        npv_index = feat.GetFieldIndex(_NPV_25Y_FIELD)
+        capwe_all_index = feat.GetFieldIndex(_CAPWE_ALL_FIELD)
+        units_index = feat.GetFieldIndex(_UNIT_FIELD)
+
+        # Get depth and captured wave energy for calculating NPV, total
+        # captured energy, and units
+        captured_wave_energy = feat.GetFieldAsDouble(cap_wave_energy_index)
+        depth = feat.GetFieldAsDouble(depth_index)
+        npv_result, capwe_all_result = _get_npv_results(
+            captured_wave_energy, depth, number_of_machines,
+            wave_to_land_dist, land_to_grid_dist, machine_econ_dict)
+
+        feat.SetField(npv_index, npv_result)
+        feat.SetField(capwe_all_index, capwe_all_result)
+        feat.SetField(units_index, number_of_machines)
+
+        target_wave_layer.SetFeature(feat)
+        feat = None
+
+    target_wave_layer = None
+    target_wave_vector = None
 
 
 def _get_validated_dataframe(csv_path, field_list):
@@ -741,7 +935,7 @@ def _get_points_geometries(base_vector_path):
     as [x_location,y_location] in a numpy array.
 
     Parameters:
-        base_vector_path (str): a path to an OGR shapefile
+        base_vector_path (str): a path to an OGR vector file.
 
     Returns:
         an array of points, representing the geometry of each point in the
@@ -751,13 +945,11 @@ def _get_points_geometries(base_vector_path):
     points = []
     base_vector = gdal.OpenEx(base_vector_path, gdal.OF_VECTOR)
     base_layer = base_vector.GetLayer(0)
-    feat = base_layer.GetNextFeature()
-    while feat is not None:
+    for feat in base_layer:
         x_location = float(feat.GetGeometryRef().GetX())
         y_location = float(feat.GetGeometryRef().GetY())
         points.append([x_location, y_location])
         feat = None
-        feat = base_layer.GetNextFeature()
     base_layer = None
     base_vector = None
 
@@ -765,7 +957,9 @@ def _get_points_geometries(base_vector_path):
 
 
 def _calculate_min_distances(xy_1, xy_2):
-    """For all points in xy_1, this function calculates the distance from point
+    """Calculate the shortest distances and indexes of points in xy_1 to xy_2.
+
+    For all points in xy_1, this function calculates the distance from point
     xy_1 to various points in xy_2, and stores the shortest distances found in
     a list min_dist. The function also stores the index from which ever point
     in xy_2 was closest, as an id in a list that corresponds to min_dist.
@@ -775,8 +969,10 @@ def _calculate_min_distances(xy_1, xy_2):
         xy_2 (numpy.array): An array of points in the form [x,y]
 
     Returns:
-        A numpy array of shortest distances and a numpy array of indexes
-        corresponding to the array of shortest distances
+        min_dist (numpy.array): An array of shortest distances for each point
+            in xy_1 to xy_2.
+        min_id (numpy.array): An array of indexes corresponding to the array
+            of shortest distances (min_dist).
 
     """
     # Create two numpy array of zeros with length set to as many points in xy_1
@@ -788,6 +984,7 @@ def _calculate_min_distances(xy_1, xy_2):
     for idx, xy_point in enumerate(xy_1):
         dists = numpy.sqrt(numpy.sum((xy_point - xy_2)**2, axis=1))
         min_dist[idx], min_id[idx] = dists.min(), dists.argmin()
+
     return min_dist, min_id
 
 
@@ -879,7 +1076,8 @@ def _machine_csv_to_dict(machine_csv_path):
         machine_csv_path (str): path to the input machine CSV file.
 
     Returns:
-        None.
+        machine_dict (dict): a dictionary of keys from the first column of the
+            CSV file and corresponding values from the `VALUE` column.
 
     """
     machine_dict = {}
@@ -943,7 +1141,7 @@ def _get_coordinate_transformation(source_sr, target_sr):
 def _create_percentile_rasters(base_raster_path, target_raster_path,
                                units_short, units_long, percentile_list,
                                start_value=None):
-    """Creates a percentile (quartile) raster based on the raster_dataset.
+    """Create a percentile (quartile) raster based on the raster_dataset.
 
     An attribute table is also constructed for the raster_dataset that displays
     the ranges provided by taking the quartile of values.
@@ -956,7 +1154,7 @@ def _create_percentile_rasters(base_raster_path, target_raster_path,
             ex: kW/m.
         units_long (str): The description of the units of the raster values,
             ex: wave power per unit width of wave crest length (kW/m).
-        percentile_list (list): A list of the percentiles ranges,
+        percentile_list (list): A list of the _PERCENTILES ranges,
             ex: [25, 50, 75, 90].
         start_value (str): The first value that goes to the first percentile
             range (start_value: percentile_one) (optional)
@@ -995,7 +1193,7 @@ def _create_percentile_rasters(base_raster_path, target_raster_path,
     LOGGER.debug('Range_values : %s', value_ranges)
 
     def raster_percentile(band):
-        """Group the band pixels together based on percentiles, starting from 1.
+        """Group the band pixels together based on _PERCENTILES, starting from 1.
         """
         valid_data_mask = (band != base_nodata)
         band[valid_data_mask] = numpy.searchsorted(
@@ -1075,37 +1273,37 @@ def _compute_wave_power(base_vector_path):
     vector = gdal.OpenEx(base_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
 
     # Sea water density constant (kg/m^3)
-    swd = 1028
-    # Gravitational acceleration (m/s^2)
-    grav = 9.8
+    _SWD = 1028
+    # _GRAVitational acceleration (m/s^2)
+    _GRAV = 9.8
     # Constant determining the shape of a wave spectrum (see users guide pg 23)
-    alfa = 0.86
+    _ALFA = 0.86
     # Add a waver power field to the shapefile.
     layer = vector.GetLayer()
-    field_defn = ogr.FieldDefn('WE_kWM', ogr.OFTReal)
+    field_defn = ogr.FieldDefn(_WAVE_POWER_FIELD, ogr.OFTReal)
     field_defn.SetWidth(24)
     field_defn.SetPrecision(11)
     layer.CreateField(field_defn)
     layer.ResetReading()
-    feat = layer.GetNextFeature()
+
     # For every feature (point) calculate the wave power and add the value
     # to itself in a new field
-    while feat is not None:
-        height_index = feat.GetFieldIndex('HSAVG_M')
-        period_index = feat.GetFieldIndex('TPAVG_S')
-        depth_index = feat.GetFieldIndex('DEPTH_M')
-        wp_index = feat.GetFieldIndex('WE_kWM')
+    for feat in layer:
+        height_index = feat.GetFieldIndex(_HEIGHT_FIELD)
+        period_index = feat.GetFieldIndex(_PERIOD_FIELD)
+        depth_index = feat.GetFieldIndex(_DEPTH_FIELD)
+        wp_index = feat.GetFieldIndex(_WAVE_POWER_FIELD)
         height = feat.GetFieldAsDouble(height_index)
         period = feat.GetFieldAsDouble(period_index)
         depth = feat.GetFieldAsInteger(depth_index)
 
         depth = numpy.absolute(depth)
         # wave frequency calculation (used to calculate wave number k)
-        tem = (2.0 * math.pi) / (period * alfa)
+        tem = (2.0 * math.pi) / (period * _ALFA)
         # wave number calculation (expressed as a function of
         # wave frequency and water depth)
-        k = numpy.square(tem) / (grav * numpy.sqrt(
-            numpy.tanh((numpy.square(tem)) * (depth / grav))))
+        k = numpy.square(tem) / (_GRAV * numpy.sqrt(
+            numpy.tanh((numpy.square(tem)) * (depth / _GRAV))))
         # Setting numpy overlow error to ignore because when numpy.sinh
         # gets a really large number it pushes a warning, but Rich
         # and Doug have agreed it's nothing we need to worry about.
@@ -1115,20 +1313,19 @@ def _compute_wave_power(base_vector_path):
         # function of wave energy period and water depth)
         wave_group_velocity = (((1 + (
             (2 * k * depth) / numpy.sinh(2 * k * depth))) * numpy.sqrt(
-                (grav / k) * numpy.tanh(k * depth))) / 2)
+                (_GRAV / k) * numpy.tanh(k * depth))) / 2)
 
         # Reset the overflow error to print future warnings
         numpy.seterr(over='print')
 
         # wave power calculation
-        wave_pow = ((((swd * grav) / 16) *
+        wave_pow = ((((_SWD * _GRAV) / 16) *
                      (numpy.square(height)) * wave_group_velocity) / 1000)
 
         feat.SetField(wp_index, wave_pow)
         layer.SetFeature(feat)
-        feat = layer.GetNextFeature()
+        feat = None
 
-    feat = None
     layer = None
     vector = None
 
@@ -1352,8 +1549,9 @@ def _wave_energy_capacity_to_dict(wave_data, interp_z, machine_param):
     return energy_cap
 
 
-def _index_raster_value_to_point_vector(base_point_vector_path,
-                                        base_raster_path, field_name):
+def _index_raster_value_to_point_vector(
+        base_point_vector_path, base_raster_path, target_point_vector_path,
+        field_name):
     """Add the values of a raster to the field of vector point features.
 
     Values are recorded in the attribute field of the vector. Note: If a value
@@ -1361,8 +1559,11 @@ def _index_raster_value_to_point_vector(base_point_vector_path,
     energy point on land should not be used in calculations.
 
     Parameters:
-        base_point_vector_path (str): a path to an ogr point shapefile.
-        base_raster_path(str): a path to a GDAL dataset.
+        base_point_vector_path (str): a path to an OGR point vector file.
+        base_raster_path (str): a path to a GDAL dataset.
+        target_point_vector_path (str): a path to a shapefile that has the
+            target field name in addition to the existing fields in the base
+            point vector.
         field_name (str): the name of the new field that will be added to the
             point feature. An exception will be raised if this field has
             existed in the base point vector.
@@ -1371,9 +1572,11 @@ def _index_raster_value_to_point_vector(base_point_vector_path,
         None
 
     """
-    base_vector = gdal.OpenEx(
-        base_point_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
-    base_layer = base_vector.GetLayer()
+    _copy_vector(base_point_vector_path, target_point_vector_path)
+
+    target_vector = gdal.OpenEx(
+        target_point_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+    target_layer = target_vector.GetLayer()
     raster_gt = pygeoprocessing.get_raster_info(base_raster_path)[
         'geotransform']
     pixel_size_x, pixel_size_y, raster_min_x, raster_max_y = \
@@ -1386,8 +1589,8 @@ def _index_raster_value_to_point_vector(base_point_vector_path,
 
     # Raise an exception if the field name already exists in the vector
     exact_match = True
-    if base_layer.FindFieldIndex(field_name, exact_match) == -1:
-        base_layer.CreateField(field_defn)
+    if target_layer.FindFieldIndex(field_name, exact_match) == -1:
+        target_layer.CreateField(field_defn)
     else:
         raise ValueError(
             "'%s' field should not have existed in the wave data shapefiles. "
@@ -1401,13 +1604,13 @@ def _index_raster_value_to_point_vector(base_point_vector_path,
         pygeoprocessing.get_raster_info(base_raster_path)['projection'])
     vector_sr = osr.SpatialReference()
     vector_sr.ImportFromWkt(
-        pygeoprocessing.get_vector_info(base_point_vector_path)[
+        pygeoprocessing.get_vector_info(target_point_vector_path)[
             'projection'])
     vector_coord_trans = osr.CoordinateTransformation(vector_sr, raster_sr)
 
     # Initialize an R-Tree indexing object with point geom from base_vector
     def generator_function():
-        for feat in base_layer:
+        for feat in target_layer:
             fid = feat.GetFID()
             geom = feat.GetGeometryRef()
             geom_x, geom_y = geom.GetX(), geom.GetY()
@@ -1451,23 +1654,24 @@ def _index_raster_value_to_point_vector(base_point_vector_path,
             # greater than or equal to zero we need to delete that point as
             # it should not be used in calculations
             if block_value >= 0.0:
-                base_layer.DeleteFeature(vector_fid)
+                target_layer.DeleteFeature(vector_fid)
             else:
-                feat = base_layer.GetFeature(vector_fid)
+                feat = target_layer.GetFeature(vector_fid)
                 field_index = feat.GetFieldIndex(field_name)
                 feat.SetField(int(field_index), float(block_value))
-                base_layer.SetFeature(feat)
+                target_layer.SetFeature(feat)
                 feat = None
 
     # It is not enough to just delete a feature from the layer. The
     # database where the information is stored must be re-packed so that
     # feature entry is properly removed
-    base_vector.ExecuteSQL('REPACK ' + base_layer.GetName())
-    base_layer = None
-    base_vector = None
+    target_vector.ExecuteSQL('REPACK ' + target_layer.GetName())
+    target_layer = None
+    target_vector = None
 
 
-def _captured_wave_energy_to_vector(energy_cap, wave_vector_path):
+def _energy_and_power_to_wave_vector(
+        energy_cap, base_wave_vector_path, target_wave_vector_path):
     """Add captured wave energy value from energy_cap to a field in wave_vector.
 
     The values are set corresponding to the same I,J values which is the key of
@@ -1476,43 +1680,88 @@ def _captured_wave_energy_to_vector(energy_cap, wave_vector_path):
     Parameters:
         energy_cap (dict): a dictionary with keys (I,J), representing the
             wave energy capacity values.
-        wave_vector_path (str): path to a point geometry shapefile to
-            write the new field/values to
+        base_wave_vector_path (str): a path to a wave point shapefile with
+            existing fields to copy from.
+        target_wave_vector_path (str): a path to the wave point shapefile
+            to write the new field/values to.
 
     Returns:
         None.
 
     """
-    cap_we_field = 'CAPWE_MWHY'
-    wave_vector = gdal.OpenEx(
-        wave_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
-    wave_layer = wave_vector.GetLayer()
-    # Create a new field for the shapefile
-    field_defn = ogr.FieldDefn(cap_we_field, ogr.OFTReal)
-    field_defn.SetWidth(24)
-    field_defn.SetPrecision(11)
-    wave_layer.CreateField(field_defn)
-    # For all of the features (points) in the shapefile, get the
-    # corresponding point/value from the dictionary and set the 'capWE_Sum'
-    # field as the value from the dictionary
-    for feat in wave_layer:
+    _copy_vector(base_wave_vector_path, target_wave_vector_path)
+
+    target_wave_vector = gdal.OpenEx(
+        target_wave_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+    target_wave_layer = target_wave_vector.GetLayer()
+    # Create the Captured Energy and Wave Power fields for the shapefile
+    for field_name in [_CAP_WE_FIELD, _WAVE_POWER_FIELD]:
+        field_defn = ogr.FieldDefn(field_name, ogr.OFTReal)
+        field_defn.SetWidth(24)
+        field_defn.SetPrecision(11)
+        target_wave_layer.CreateField(field_defn)
+
+    # For all of the features (points) in the shapefile, get the corresponding
+    # point/value from the dictionary and set the _CAP_WE_FIELD field as
+    # the value from the dictionary
+    for feat in target_wave_layer:
+        # Calculate and set the Captured Wave Energy field
         index_i = feat.GetFieldIndex('I')
         index_j = feat.GetFieldIndex('J')
         value_i = feat.GetField(index_i)
         value_j = feat.GetField(index_j)
+        we_index = feat.GetFieldIndex(_CAP_WE_FIELD)
         we_value = energy_cap[(value_i, value_j)]
 
-        feat.SetField(cap_we_field, we_value)
+        feat.SetField(we_index, we_value)
+
+        # Calculate and set the Wave Power field
+        height_index = feat.GetFieldIndex(_HEIGHT_FIELD)
+        period_index = feat.GetFieldIndex(_PERIOD_FIELD)
+        depth_index = feat.GetFieldIndex(_DEPTH_FIELD)
+        wp_index = feat.GetFieldIndex(_WAVE_POWER_FIELD)
+        height = feat.GetFieldAsDouble(height_index)
+        period = feat.GetFieldAsDouble(period_index)
+        depth = feat.GetFieldAsInteger(depth_index)
+
+        depth = numpy.absolute(depth)
+        # wave frequency calculation (used to calculate wave number k)
+        tem = (2.0 * math.pi) / (period * _ALFA)
+        # wave number calculation (expressed as a function of
+        # wave frequency and water depth)
+        k = numpy.square(tem) / (_GRAV * numpy.sqrt(
+            numpy.tanh((numpy.square(tem)) * (depth / _GRAV))))
+        # Setting numpy overflow error to ignore because when numpy.sinh
+        # gets a really large number it pushes a warning, but Rich
+        # and Doug have agreed it's nothing we need to worry about.
+        numpy.seterr(over='ignore')
+
+        # wave group velocity calculation (expressed as a
+        # function of wave energy period and water depth)
+        wave_group_velocity = (((1 + (
+            (2 * k * depth) / numpy.sinh(2 * k * depth))) * numpy.sqrt(
+                (_GRAV / k) * numpy.tanh(k * depth))) / 2)
+
+        # Reset the overflow error to print future warnings
+        numpy.seterr(over='print')
+
+        # wave power calculation
+        wave_pow = ((((_SWD * _GRAV) / 16) *
+                     (numpy.square(height)) * wave_group_velocity) / 1000)
+
+        feat.SetField(wp_index, wave_pow)
+
         # Save the feature modifications to the layer.
-        wave_layer.SetFeature(feat)
+        target_wave_layer.SetFeature(feat)
         feat = None
-    wave_layer = None
-    wave_vector = None
+
+    target_wave_layer = None
+    target_wave_vector = None
 
 
 def _calculate_percentiles_from_raster(
         base_raster_path, percentile_list, start_value=None):
-    """Determine the percentiles of a raster using the nearest-rank method.
+    """Determine the _PERCENTILES of a raster using the nearest-rank method.
 
     Iterate through the raster blocks and round the unique values for
     efficiency. Then add each unique value-count pair into a dictionary.
@@ -1520,13 +1769,13 @@ def _calculate_percentiles_from_raster(
 
     Parameters:
         base_raster_path (str): path to a gdal raster on disk
-        percentile_list (list): a list of desired percentiles to lookup,
+        percentile_list (list): a list of desired _PERCENTILES to lookup,
             ex: [25,50,75,90]
         start_value (str): the first value that goes to the first percentile
             range (start_value: percentile_one). (optional)
 
     Returns:
-            a list of values corresponding to the percentiles from the list
+            a list of values corresponding to the _PERCENTILES from the list
 
     """
     nodata = pygeoprocessing.get_raster_info(base_raster_path)['nodata'][0]
