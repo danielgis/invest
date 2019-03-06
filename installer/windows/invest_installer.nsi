@@ -315,6 +315,8 @@ Section "InVEST Tools" Section_InVEST_Tools
     !insertmacro StartMenuLink "${SMPATH}\RouteDEM" "routedem"
     !insertmacro StartMenuLink "${SMPATH}\DelineateIt" "delineateit"
     !insertmacro StartMenuLink "${SMPATH}\Recreation" "recreation"
+    !insertmacro StartMenuLink "${SMPATH}\Urban Flood Risk Mitigation" "ufrm"
+
 
     !define COASTALBLUECARBON "${SMPATH}\Coastal Blue Carbon"
     CreateDirectory "${COASTALBLUECARBON}"
