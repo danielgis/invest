@@ -1,7 +1,5 @@
 .. :changelog:
 
-.. Unreleased Changes
-
 Unreleased Changes
 ------------------
 * Adding bitbucket pipelines and AppVeyor build configurations.
@@ -15,6 +13,11 @@ Unreleased Changes
   data will re-use intermediate geoprocessing results. Multiprocessing offered
   by taskgraph means server-side PUD calculations and client-side predictor
   data processing can happen in parallel. Some output filenames have changed.
+* Refactoring Habitat Risk Assessment (HRA) Model to use TaskGraph and
+  Pygeoprocessing 1.x. The HRA Proprocessor is removed and its previous
+  functionality was simplified and merged into the HRA model itself.
+  The model will no longer generate HTML plots and tables, since we're
+  planning to use Node.js for the visualization.
 
 3.6.0 (2019-01-30)
 ------------------
