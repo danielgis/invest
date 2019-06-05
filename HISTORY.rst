@@ -2,7 +2,14 @@
 
 Unreleased Changes
 ------------------
-* Fixed a bug in Coastal Vulnerability model's task graph that sometimes 
+* InVEST Coastal Blue Carbon model now writes out a net present value
+  raster for the year of the current landcover, each transition year,
+  and the final analysis year (if provided).
+* Correcting an issue with InVEST Coastal Blue Carbon where incorrect
+  configuration of a nodata value would result in ``-inf`` values in
+  output rasters.  Now, any values without a defined reclassification
+  rule that make it past validation will be written out as nodata.
+* Fixed a bug in Coastal Vulnerability model's task graph that sometimes
   caused an early task to re-execute when it should be deemed pre-calculated.
 * Fixed a bug in the pollination model that would cause outputs to be all 0
   rasters if all the ``relative_abundance`` fields in the guild table were
