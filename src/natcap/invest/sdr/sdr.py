@@ -20,16 +20,18 @@ import numpy
 import pygeoprocessing
 import pygeoprocessing.routing
 import taskgraph
-from . import utils
-from . import validation
+from .. import utils
+from .. import validation
+from . import sdr_core
 
-LOGGER = logging.getLogger('natcap.invest.sdr')
+LOGGER = logging.getLogger(__name__)
 
 _OUTPUT_BASE_FILES = {
     'rkls_path': 'rkls.tif',
     'sed_export_path': 'sed_export.tif',
     'sed_retention_index_path': 'sed_retention_index.tif',
     'sed_retention_path': 'sed_retention.tif',
+    'sediment_deposition_path': 'sediment_deposition.tif',
     'stream_and_drainage_path': 'stream_and_drainage.tif',
     'stream_path': 'stream.tif',
     'usle_path': 'usle.tif',
@@ -43,6 +45,7 @@ _INTERMEDIATE_BASE_FILES = {
     'd_up_bare_soil_path': 'd_up_bare_soil.tif',
     'd_up_path': 'd_up.tif',
     'dem_offset_path': 'dem_offset.tif',
+    'f_path': 'f.tif',
     'flow_accumulation_path': 'flow_accumulation.tif',
     'flow_direction_path': 'flow_direction.tif',
     'ic_bare_soil_path': 'ic_bare_soil.tif',
@@ -62,6 +65,7 @@ _INTERMEDIATE_BASE_FILES = {
     'w_path': 'w.tif',
     'ws_factor_path': 'ws_factor.tif',
     'ws_inverse_path': 'ws_inverse.tif',
+    'e_prime_path': 'e_prime.tif',
     }
 
 _TMP_BASE_FILES = {
@@ -120,6 +124,7 @@ def execute(args):
 
     Returns:
         None.
+
     """
     file_suffix = utils.make_suffix_string(args, 'results_suffix')
     lufield_id = 'lucode'
@@ -447,6 +452,28 @@ def execute(args):
         dependent_task_list=[usle_task, sdr_task],
         task_name='calculate sed export')
 
+    e_prime_task = task_graph.add_task(
+        func=_calculate_e_prime,
+        args=(
+            f_reg['usle_path'], f_reg['sdr_path'], f_reg['e_prime_path']),
+        hash_algorithm='md5',
+        copy_duplicate_artifact=True,
+        target_path_list=[f_reg['e_prime_path']],
+        dependent_task_list=[usle_task, sdr_task],
+        task_name='calculate export prime')
+
+    _ = task_graph.add_task(
+        func=sdr_core.calculate_sediment_deposition,
+        args=(
+            f_reg['flow_direction_path'], f_reg['e_prime_path'],
+            f_reg['f_path'], f_reg['sdr_path'],
+            f_reg['sediment_deposition_path']),
+        dependent_task_list=[e_prime_task, sdr_task, flow_dir_task],
+        hash_algorithm='md5',
+        copy_duplicate_artifact=True,
+        target_path_list=[f_reg['sediment_deposition_path']],
+        task_name='sediment deposition')
+
     _ = task_graph.add_task(
         func=_calculate_sed_retention_index,
         args=(
@@ -563,6 +590,7 @@ def _calculate_ls_factor(
 
     Returns:
         None
+
     """
     slope_nodata = pygeoprocessing.get_raster_info(slope_path)['nodata'][0]
     aspect_nodata = pygeoprocessing.get_raster_info(aspect_path)['nodata'][0]
@@ -580,8 +608,10 @@ def _calculate_ls_factor(
             aspect_angle (numpy.ndarray): flow direction in radians
             percent_slope (numpy.ndarray): slope in percent
             flow_accumulation (numpy.ndarray): upstream pixels
+
         Returns:
             ls_factor
+
         """
         valid_mask = (
             (aspect_angle != aspect_nodata) &
@@ -661,6 +691,7 @@ def _calculate_rkls(
 
     Returns:
         None
+
     """
     erosivity_nodata = pygeoprocessing.get_raster_info(
         erosivity_path)['nodata'][0]
@@ -725,6 +756,7 @@ def _threshold_slope(slope_path, out_thresholded_slope_path):
 
     Returns:
         None
+
     """
     slope_nodata = pygeoprocessing.get_raster_info(slope_path)['nodata'][0]
 
@@ -760,6 +792,7 @@ def _add_drainage(stream_path, drainage_path, out_stream_and_drainage_path):
 
     Returns:
         None
+
     """
     def add_drainage_op(stream, drainage):
         """Add drainage mask to stream layer."""
@@ -788,6 +821,7 @@ def _calculate_w(
 
     Returns:
         None
+
     """
     lulc_to_c = dict(
         [(lulc_code, float(table['usle_c'])) for
@@ -823,6 +857,7 @@ def _calculate_cp(biophysical_table, lulc_path, cp_factor_path):
 
     Returns:
         None
+
     """
     lulc_to_cp = dict(
         [(lulc_code, float(table['usle_c']) * float(table['usle_p'])) for
@@ -835,7 +870,6 @@ def _calculate_cp(biophysical_table, lulc_path, cp_factor_path):
 def _calculate_usle(
         rkls_path, cp_factor_path, drainage_raster_path, out_usle_path):
     """Calculate USLE, multiply RKLS by CP and set to 1 on drains."""
-
     def usle_op(rkls, cp_factor, drainage):
         """Calculate USLE."""
         result = numpy.empty(rkls.shape)
@@ -871,6 +905,7 @@ def _calculate_bar_factor(
 
     Returns:
         None.
+
     """
     flow_accumulation_nodata = pygeoprocessing.get_raster_info(
         flow_accumulation_path)['nodata'][0]
@@ -983,7 +1018,6 @@ def _calculate_inverse_ws_factor(
 def _calculate_inverse_s_factor(
         thresholded_slope_path, out_s_factor_inverse_path):
     """Calculate 1/s."""
-
     slope_nodata = pygeoprocessing.get_raster_info(
         thresholded_slope_path)['nodata'][0]
 
@@ -1024,7 +1058,6 @@ def _calculate_ic(d_up_path, d_dn_path, out_ic_factor_path):
 def _calculate_sdr(
         k_factor, ic_0, sdr_max, ic_path, stream_path, out_sdr_path):
     """Derive SDR from k, ic0, ic; 0 on the stream and clamped to sdr_max."""
-
     def sdr_op(ic_factor, stream):
         """Calculate SDR factor."""
         valid_mask = (
@@ -1041,9 +1074,8 @@ def _calculate_sdr(
         gdal.GDT_Float32, _TARGET_NODATA)
 
 
-def _calculate_sed_export(usle_path, sdr_path, out_sed_export_path):
+def _calculate_sed_export(usle_path, sdr_path, target_sed_export_path):
     """Calculate USLE * SDR."""
-
     def sed_export_op(usle, sdr):
         """Sediment export."""
         valid_mask = (usle != _TARGET_NODATA) & (sdr != _TARGET_NODATA)
@@ -1053,7 +1085,22 @@ def _calculate_sed_export(usle_path, sdr_path, out_sed_export_path):
         return result
 
     pygeoprocessing.raster_calculator(
-        [(usle_path, 1), (sdr_path, 1)], sed_export_op, out_sed_export_path,
+        [(usle_path, 1), (sdr_path, 1)], sed_export_op,
+        target_sed_export_path, gdal.GDT_Float32, _TARGET_NODATA)
+
+
+def _calculate_e_prime(usle_path, sdr_path, target_e_prime):
+    """Calculate USLE * (1-SDR)."""
+    def e_prime_op(usle, sdr):
+        """Wash that does not reach stream."""
+        valid_mask = (usle != _TARGET_NODATA) & (sdr != _TARGET_NODATA)
+        result = numpy.empty(valid_mask.shape, dtype=numpy.float32)
+        result[:] = _TARGET_NODATA
+        result[valid_mask] = usle[valid_mask] * (1-sdr[valid_mask])
+        return result
+
+    pygeoprocessing.raster_calculator(
+        [(usle_path, 1), (sdr_path, 1)], e_prime_op, target_e_prime,
         gdal.GDT_Float32, _TARGET_NODATA)
 
 
@@ -1061,7 +1108,6 @@ def _calculate_sed_retention_index(
         rkls_path, usle_path, sdr_path, sdr_max,
         out_sed_retention_index_path):
     """Calculate (rkls-usle) * sdr  / sdr_max."""
-
     def sediment_index_op(rkls, usle, sdr_factor):
         """Calculate sediment retention index."""
         valid_mask = (
@@ -1103,6 +1149,7 @@ def _calculate_sed_retention(
 
     Returns:
         None
+
     """
     stream_nodata = pygeoprocessing.get_raster_info(stream_path)['nodata'][0]
 
@@ -1183,6 +1230,7 @@ def validate(args, limit_to=None):
             tuples. Where an entry indicates that the invalid keys caused
             the error message in the second part of the tuple. This should
             be an empty list if validation succeeds.
+
     """
     missing_key_list = []
     no_value_list = []
