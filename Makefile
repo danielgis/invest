@@ -95,6 +95,8 @@ DATA_BASE_URL := $(DOWNLOAD_DIR_URL)/data
 
 TESTRUNNER := $(PYTHON) -m nose -vsP --with-coverage --cover-package=natcap.invest --cover-erase --with-xunit --cover-tests --cover-html --cover-xml --logging-level=DEBUG --with-timer
 
+DATAVALIDATOR := $(PYTHON) scripts/invest-autovalidate.py $(GIT_SAMPLE_DATA_REPO_PATH)
+TEST_DATAVALIDATOR := $(PYTHON) -m nose -vsP scripts/invest-autovalidate.py
 
 # Target names.
 INVEST_BINARIES_DIR := $(DIST_DIR)/invest
@@ -108,7 +110,7 @@ MAC_BINARIES_ZIP_FILE := "$(DIST_DIR)/InVEST-$(VERSION)-mac.zip"
 MAC_APPLICATION_BUNDLE := "$(BUILD_DIR)/mac_app_$(VERSION)/InVEST.app"
 
 
-.PHONY: fetch install binaries apidocs userguide windows_installer mac_installer sampledata sampledata_single test test_ui clean help check python_packages jenkins purge mac_zipfile deploy
+.PHONY: fetch install binaries apidocs userguide windows_installer mac_installer sampledata sampledata_single test test_ui clean help check python_packages jenkins purge mac_zipfile deploy signcode
 
 # Very useful for debugging variables!
 # $ make print-FORKNAME, for example, would print the value of the variable $(FORKNAME)
@@ -143,6 +145,10 @@ test: $(GIT_TEST_DATA_REPO_PATH)
 
 test_ui:
 	$(TESTRUNNER) ui_tests
+
+validate_sampledata: $(GIT_SAMPLE_DATA_REPO_PATH)
+	$(TEST_DATAVALIDATOR)
+	$(DATAVALIDATOR)
 
 clean:
 	$(PYTHON) setup.py clean
@@ -328,6 +334,18 @@ jenkins_test_ui: env
 
 jenkins_test: env $(GIT_TEST_DATA_REPO_PATH)
 	$(MAKE) PYTHON=$(ENV_SCRIPTS)/python test
+
+CERT_FILE := StanfordUniversity.crt
+KEY_FILE := Stanford-natcap-code-signing-2019-03-07.key.pem
+signcode:
+	gsutil cp gs://stanford_cert/$(CERT_FILE) $(BUILD_DIR)/$(CERT_FILE)
+	gsutil cp gs://stanford_cert/$(KEY_FILE) $(BUILD_DIR)/$(KEY_FILE)
+	# On some OS (including our build container), osslsigncode fails with Bus error if we overwrite the binary when signing.
+	osslsigncode -certs $(BUILD_DIR)/$(CERT_FILE) -key $(BUILD_DIR)/$(KEY_FILE) -pass $(CERT_KEY_PASS) -in $(BIN_TO_SIGN) -out "signed.exe"
+	mv "signed.exe" $(BIN_TO_SIGN)
+	rm $(BUILD_DIR)/$(CERT_FILE)
+	rm $(BUILD_DIR)/$(KEY_FILE)
+	@echo "Installer was signed"
 
 deploy:
 	gsutil -m rsync -r $(DIST_DIR)/userguide $(DIST_URL_BASE)/userguide
