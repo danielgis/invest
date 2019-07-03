@@ -14,11 +14,15 @@ import atexit
 import itertools
 
 try:
-    unicode
-except NameError:
+    import PyQt4
+except ImportError:
     # Need to explicitly import PySide2 when on python3.  It's the only Qt
     # binding I can seem to get to work under python3.
     import PySide2
+
+try:
+    unicode
+except NameError:
     unicode = str
 
 import qtpy
