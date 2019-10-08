@@ -2,6 +2,11 @@
 
 Unreleased Changes
 ------------------
+* Correcting an issue with the Wave Energy UI where a second results suffix
+  input was accidentally provided.  The second suffix input has been removed.
+* The results suffix key for the Wave Energy and Wind Energy models has been
+  renamed ``results_suffix`` (was previously ``suffix``).  This is for
+  consistency across InVEST models.
 * Fixed a ``TypeError`` issue in Seasonal Water Yield that would occur when
   the Land-Use/Land-Cover raster did not have a defined nodata value.  This
   case is now handled correctly.
