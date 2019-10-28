@@ -2,6 +2,14 @@
 
 Unreleased Changes
 ------------------
+* All InVEST models now have an ``ARGS_SPEC`` object that contains metadata
+  about the model and describes the model's arguments.  Validation has been
+  reimplemented across all models to use these ``ARGS_SPEC`` objects.
+* Correcting an issue with the Wave Energy UI where a second results suffix
+  input was accidentally provided.  The second suffix input has been removed.
+* The results suffix key for the Wave Energy and Wind Energy models has been
+  renamed ``results_suffix`` (was previously ``suffix``).  This is for
+  consistency across InVEST models.
 * Implemented PEP518-compatible build system definition in the file
   ``pyproject.toml``.  This should make it easier to install ``natcap.invest``
   from a source distribution.
