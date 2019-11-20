@@ -2,6 +2,12 @@
 
 Unreleased Changes
 ------------------
+* All InVEST models now have an ``ARGS_SPEC`` object that contains metadata
+  about the model and describes the model's arguments.  Validation has been
+  reimplemented across all models to use these ``ARGS_SPEC`` objects.
+* The results suffix key for the Wave Energy and Wind Energy models has been
+  renamed ``results_suffix`` (was previously ``suffix``).  This is for
+  consistency across InVEST models.
 * Fixed the duplicate ``results_suffix`` input in Wave Energy UI.
 * Added a human-friendly message on NDR model ``KeyError``.
 * Adding a check to Annual Water Yield to ensure that the ``LULC_veg`` column
